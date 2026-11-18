@@ -50,6 +50,11 @@ def build(path):
     for rng in ("B15:C15", "D15:E15", "G15:H15", "J15:K15", "M15:O15"):
         ws.merge_cells(rng)
     ws["B15"] = "令和"; ws["F15"] = "年"; ws["I15"] = "月"; ws["M15"] = "日提出"
+    # an address box with 〒 printed in its corner
+    ws.merge_cells("B17:E17"); ws["B17"] = "送付先"
+    ws.merge_cells("F17:P18"); ws["F17"] = "〒"
+    for c in range(6, 17):
+        side(ws, 17, c, top=T); side(ws, 18, c, bottom=T)
     # big frame J4:AD13, labels inside, values in the open space
     for c in range(10, 31):
         side(ws, 4, c, top=T); side(ws, 13, c, bottom=T)
