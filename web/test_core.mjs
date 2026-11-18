@@ -212,6 +212,13 @@ const fillCases = [
   { src: 'tests/fixtures_hard/shinsei_kikan.xlsx', data: { 出張期間: '2026-12-01' }, warnings: true },
   { src: 'tests/fixtures_hard/rirekisho.xlsx', data: { 現住所: '東京都千代田区1-1', 性別: '女', '学歴・職歴': [{ 年: '2009', 月: '4', '学歴・職歴': '入学' }] },
     expect: { '履歴書!B14': 2009 }, readback: ['| 現住所 | テキスト | F10:Y10 | [履歴書] 現在値: 東京都千代田区1-1 |', '1行記入済み', '現在値: 男 ・ （女）'] },
+  // real-form layouts and Excel form-control check boxes
+  { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: '2026-11-19', 法人番号: '1234567890123', 担当者名: '山田', '所在地（住所）': '広島市' },
+    expect: { '届出書!D15': 8, '届出書!G15': 11, '届出書!J15': 19, '届出書!O12': '山田' } },
+  { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: '2018-01-01' }, errors: true },
+  { src: 'tests/fixtures_hard/checkbox_controls.xlsx', data: { '名称変更/社名変更': true, '名称変更/法人成り': false, '所在地変更/その他': 'はい', 氏名: '山田' },
+    expect: { '変更届!F8': '山田' } },
+  { src: 'tests/fixtures_hard/checkbox_controls.xlsx', data: { '名称変更/社名変更': 'たぶん' }, errors: true },
   // tests/test_safety.py (fixtures_review: files saved by real Excel)
   { src: 'tests/fixtures_review/base.xlsx', data: { A11: 'x', A12: 'y', A14: 'z' }, expect: { 'Sheet1!A11': 'x', 'Sheet1!A12': 'y', 'Sheet1!A14': 'z' } },
   { src: 'tests/fixtures_review/empty.xlsx', data: { A1: 'a', B3: 'b', C2: 'c' }, expect: { 'Sheet1!A1': 'a', 'Sheet1!B3': 'b', 'Sheet1!C2': 'c' } },

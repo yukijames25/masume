@@ -949,6 +949,7 @@ class Sheet {
     this.cells = new Map(); // KEY(r,c) -> Cell
     this.merges = [];
     this.locked = []; // [[r1, c1, r2, c2], reason]
+    this.controls = []; // form-control check boxes
     this._max = null;
   }
   lockReason(row, col) {
@@ -1115,6 +1116,63 @@ async function readTables(zip, spath, sheet) {
   }
 }
 
+/** A form control (チェックボックス) floating over the grid. */
+class Control {
+  constructor(o) { Object.assign(this, o); }
+  get row() { return Math.floor((this.r1 + this.r2) / 2); }
+}
+const XDR = '{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}';
+const vmlShapeRe = (sid) => new RegExp(`<v:shape\\b[^>]*\\b(?:id|o:spid)="_x0000_s${escapeRe(sid)}"[^>]*>[^]*?</v:shape>`, 'u');
+function* xiterTag(el, tag) { if (el.tag === tag) yield el; for (const c of el.children) yield* xiterTag(c, tag); }
+async function sheetRels(zip, spath) {
+  const k = spath.lastIndexOf('/');
+  const d = k >= 0 ? spath.slice(0, k) : '', fn = spath.slice(k + 1);
+  const relsPath = `${d}/_rels/${fn}.rels`;
+  const out = new Map();
+  if (!zip.byName.has(relsPath)) return out;
+  const rels = await readXml(zip, relsPath);
+  for (const r of xfindall(rels, '{' + PKG_RNS + '}Relationship')) out.set(xget(r, 'Id', null), [xget(r, 'Type', ''), resolveTarget(d, xget(r, 'Target', ''))]);
+  return out;
+}
+/** Form-control check boxes (xl/ctrlProps) and their legacy VML twins. */
+async function readControls(zip, spath, root, sheet) {
+  const els = [...xiterTag(root, N + 'control')];
+  if (!els.length) return;
+  const rels = await sheetRels(zip, spath);
+  let vml = null;
+  for (const [ty, t] of rels.values()) if (ty.endsWith('/vmlDrawing') && zip.byName.has(t)) { vml = t; break; }
+  const vmlText = vml ? new TextDecoder('utf-8').decode(await zipRead(zip, vml)) : '';
+  const seen = new Set();
+  const int = (el) => { const v = el ? parseInt(el.text, 10) : NaN; if (Number.isNaN(v)) throw new ValueError('anchor'); return v; };
+  for (const el of els) {
+    const sid = xget(el, 'shapeId', null);
+    const rid = xget(el, '{' + RNS + '}id', null);
+    const anchor = xfind(xfind(el, N + 'controlPr'), N + 'anchor');
+    if (!sid || seen.has(sid) || !anchor || !rels.has(rid)) continue;
+    const [ty, target] = rels.get(rid);
+    if (!ty.endsWith('/ctrlProp') || !zip.byName.has(target)) continue;
+    let r1, c1, r2, c2;
+    try {
+      const fr = xfind(anchor, N + 'from'), to = xfind(anchor, N + 'to');
+      if (!fr || !to) continue;
+      c1 = int(xfind(fr, XDR + 'col')) + 1; r1 = int(xfind(fr, XDR + 'row')) + 1;
+      c2 = int(xfind(to, XDR + 'col')) + 1; r2 = int(xfind(to, XDR + 'row')) + 1;
+    } catch (e) { if (e instanceof ValueError) continue; throw e; }
+    const prop = await readXml(zip, target);
+    let text = '';
+    const m = vmlText ? vmlShapeRe(sid).exec(vmlText) : null;
+    if (m) {
+      const div = /<v:textbox\b[^]*?<\/v:textbox>/u.exec(m[0]);
+      if (div) text = stripWS(div[0].replace(/<[^>]+>/gu, ''));
+    }
+    seen.add(sid);
+    sheet.controls.push(new Control({
+      shape_id: sid, kind: xget(prop, 'objectType', ''), r1, c1, r2, c2,
+      checked: xget(prop, 'checked', null) === 'Checked', prop_part: target, vml_part: m ? vml : null, text: decodeX(text),
+    }));
+  }
+}
+
 /** Load a workbook from bytes (Uint8Array / ArrayBuffer). */
 async function load(input) {
   const u8 = input instanceof Uint8Array ? input : new Uint8Array(input);
@@ -1139,8 +1197,10 @@ async function load(input) {
     const spath = relTarget.get(rid);
     if (!spath || !names.has(spath)) continue;
     const sheet = new Sheet(xget(s, 'name', ''), spath, xget(s, 'state', 'visible') !== 'visible');
-    readSheetXml(await readXml(zip, spath), sheet, shared);
+    const sroot = await readXml(zip, spath);
+    readSheetXml(sroot, sheet, shared);
     await readTables(zip, spath, sheet);
+    await readControls(zip, spath, sroot, sheet);
     sheets.push(sheet);
   }
   return new Workbook(sheets, await readStyles(zip), zip);
@@ -1319,7 +1379,27 @@ function forceRecalc(wbXml) {
 
 const utf8strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 /** updates: Map(sheetPath -> Map(KEY -> [r, c, value])) -> new xlsx bytes */
-async function saveWithUpdates(wb, updates, recalc = true) {
+/** Tick / untick a <formControlPr> (x14 form control). */
+function setControlProp(xml, checked) {
+  const m = /<(\w+:)?formControlPr\b[^>]*?(\/?)>/u.exec(xml);
+  if (!m) throw new WriteError('form control without formControlPr');
+  let tag = m[0].replace(/\s+checked="[^"]*"/gu, '');
+  if (checked) tag = tag.replace(/\s*(\/?)>$/u, ' checked="Checked"$1>');
+  return xml.slice(0, m.index) + tag + xml.slice(m.index + m[0].length);
+}
+/** Same for the legacy VML copy (<x:Checked>). */
+function setControlVml(vml, shapeId, checked) {
+  const m = vmlShapeRe(shapeId).exec(vml);
+  if (!m) return vml;
+  let shape = m[0].replace(/\s*<x:Checked>[^<]*<\/x:Checked>/gu, '');
+  if (checked) shape = shape.replace('</x:ClientData>', '<x:Checked>1</x:Checked></x:ClientData>');
+  return vml.slice(0, m.index) + shape + vml.slice(m.index + m[0].length);
+}
+// latin-1 view: one char per byte, so an ASCII edit keeps every other byte as it was
+const bytesToLatin1 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode(...u8.subarray(i, i + 8192)); return s; };
+const latin1ToBytes = (s) => { const u8 = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i) & 0xff; return u8; };
+
+async function saveWithUpdates(wb, updates, recalc = true, controls = []) {
   const enc = new TextEncoder();
   const replaced = new Map();
   for (const [spath, cells] of updates) {
@@ -1332,7 +1412,15 @@ async function saveWithUpdates(wb, updates, recalc = true) {
     if (problems.length) throw new WriteError("refusing to write a sheet Excel would reject: " + problems.slice(0, 3).join('; '));
     replaced.set(spath, enc.encode(newXml));
   }
-  if (recalc && replaced.size && wb.zip.byName.has('xl/workbook.xml')) {
+  for (const [ctl, checked] of controls) {
+    const cur = replaced.get(ctl.prop_part) || await zipRead(wb.zip, ctl.prop_part);
+    replaced.set(ctl.prop_part, enc.encode(setControlProp(new TextDecoder('utf-8').decode(cur), checked)));
+    if (ctl.vml_part) {
+      const raw = replaced.get(ctl.vml_part) || await zipRead(wb.zip, ctl.vml_part);
+      replaced.set(ctl.vml_part, latin1ToBytes(setControlVml(bytesToLatin1(raw), ctl.shape_id, checked)));
+    }
+  }
+  if (recalc && [...replaced.keys()].some((k) => updates.has(k)) && wb.zip.byName.has('xl/workbook.xml')) {
     replaced.set('xl/workbook.xml', enc.encode(forceRecalc(utf8strict.decode(await zipRead(wb.zip, 'xl/workbook.xml')))));
   }
   return rewriteZip(wb.zip, replaced);
@@ -1382,6 +1470,8 @@ const RE_OFFICE_USE = /受付印?$|受付番号|受理|記入欄$|処理欄|事�
 // the printed addressee 「広島市長」「〇〇税務署長」 is not a label
 const RE_ADDRESSEE = /(?:市|区|町|村|都|道|府|県|署|所|局|庁)長$|知事$/u;
 const ERA_NAMES = new Set(['令和', '平成', '昭和', '西暦']);
+// 「⑴ 名称変更」「(2) 所在地変更」: the group a check box belongs to
+const RE_GROUP_NO = /^(?:[⑴-⒇①-⑳]|[（(][0-9０-９]{1,2}[)）])/u;
 const sideList = (reg) => [...reg.sides];
 const BRACKET_PAIRS = { '（': '）', '(': ')', '【': '】', '[': ']', '「': '」', '〔': '〕' };
 
@@ -1715,6 +1805,9 @@ function detectSheet(sheet, styles) {
     }
   }
 
+  // ---- 2b. form-control check boxes floating over the grid
+  fields.push(...controlFields(g, sheet, usedLabels, claimed));
+
   const labels = regions.filter(freeLabel);
   const labelSet = new RSet(labels);
 
@@ -1930,6 +2023,52 @@ function scanRight(g, lab, row, claimed, used) {
   const b0 = boxes[0];
   if (!b0.merged && !b0.sides.has('bottom') && sideList(b0).length < 3) return null; // a corner of a frame
   return ['text', boxes, prefix, suffixes];
+}
+
+/** One field per form-control check box; its caption is the text right of it. */
+function controlFields(g, sheet, used, claimed) {
+  const out = [];
+  const captions = [];
+  const boxes = sheet.controls.filter((c) => c.kind === 'CheckBox');
+  for (const ctl of boxes) {
+    const row = ctl.row;
+    let lab = null;
+    for (let c = ctl.c1; c < ctl.c2 + 6; c++) {
+      const reg = g.at(row, c);
+      if (reg !== null && !reg.empty && isStr(reg.value) && reg.c1 >= ctl.c1) { lab = reg; break; }
+    }
+    let label = ctl.text || (lab !== null ? lab.text : '');
+    if (lab !== null && !ctl.text) {
+      captions.push(lab);
+      const nxt = g.at(lab.r2 + 1, lab.c1);
+      if (label.endsWith('、') && nxt !== null && !nxt.empty && isStr(nxt.value) &&
+          !boxes.some((b) => b.row === nxt.r1 && Math.abs(b.c1 - ctl.c1) <= 2)) {
+        label += nxt.text; // 「旧社名の法人は登記上存続し、」+「社名変更」
+        captions.push(nxt);
+      }
+    }
+    label = label.replace(RE_SPACES, '') || 'チェック';
+    out.push(new Field('', label, sheet.name, makeRef(row, ctl.c1), `${makeRef(ctl.r1, ctl.c1)}:${makeRef(ctl.r2, ctl.c2)}`, 'checkbox',
+      { options: [label], parts: [{ control: ctl.shape_id }], value: ctl.checked ? true : null }));
+  }
+  out.forEach((f, i) => {
+    const ctl = boxes[i];
+    for (let r = ctl.row - 1; r > Math.max(ctl.row - 9, 0); r--) {
+      let hit = null;
+      for (let c = Math.max(ctl.c1 - 4, 1); c < ctl.c1 + 2; c++) {
+        const reg = g.at(r, c);
+        if (reg !== null && reg.r1 === r && !reg.empty && isStr(reg.value) && RE_GROUP_NO.test(normalizeLabel(reg.text))) { hit = reg; break; }
+      }
+      if (hit !== null) {
+        f.id_hint = normalizeLabel(hit.text).replace(RE_GROUP_NO, '') + '/' + normalizeLabel(f.label);
+        used.add(hit);
+        break;
+      }
+    }
+  });
+  used.addAll(captions);
+  claimed.addAll(captions);
+  return out;
 }
 
 function makeBoxField(sheet, label, kind, boxes, prefix, suffixes) {
@@ -2486,12 +2625,33 @@ function previewCells(f, value, mark = '■') {
   return out;
 }
 
+function controlOf(wb, f) {
+  const sid = f.parts.length ? f.parts[0].control : undefined;
+  for (const c of wb.sheet(f.sheet).controls) if (c.shape_id === sid) return c;
+  throw new FillError(`check box ${pyRepr(sid ?? null)} not found in sheet ${pyRepr(f.sheet)}`);
+}
+const YES = new Set(['true', 'yes', 'on', '1', 'はい', '有', 'あり', 'する', '✓', '✔', 'レ', '■', '☑', '○', '〇', '済']);
+const NO = new Set(['false', 'no', 'off', '0', 'いいえ', '無', 'なし', 'しない', '□', '☐']);
+function truthy(value, f) {
+  if (typeof value === 'boolean') return value;
+  if (isPyNum(value)) return Number(value) !== 0;
+  const t = normalizeLabel(pyStr(value)).toLowerCase();
+  if (YES.has(t) || t === normalizeLabel(f.label).toLowerCase()) return true;
+  if (NO.has(t)) return false;
+  throw new FillError(`check box takes true / false (or 「${f.label}」), got ${pyRepr(value)}`);
+}
+
 async function verify(bytes, written, errors) {
   const out = await load(bytes);
   let ok = true;
   for (const w of written) {
     const k = w.cell.lastIndexOf('!');
     const sname = w.cell.slice(0, k), ref = w.cell.slice(k + 1);
+    if ('control' in w) {
+      const got = out.sheet(sname).controls.some((c) => c.shape_id === w.control && c.checked);
+      if (got !== w.value) { ok = false; errors.push(`verify failed at ${w.cell}: check box should be ${w.value ? 'True' : 'False'}`); }
+      continue;
+    }
     const [r, c] = parseRef(ref);
     const got = out.sheet(sname).value(r, c);
     let want = w.value;
@@ -2515,6 +2675,7 @@ async function fill(wb, data, opts = {}) {
   if (!fields) fields = detect(wb, sheet);
   const report = { verified: null, written: [], unknown_keys: [], unfilled: [], warnings: [], errors: [] };
   const updates = new Map();
+  const controls = new Map(); // shape id -> [Control, checked]
   const sheetPath = new Map(wb.sheets.map((s) => [s.name, s.path]));
   const defaultSheet = sheet ? wb.sheet(sheet).name : formSheets(wb)[0].name;
   const touched = new Set();
@@ -2558,7 +2719,12 @@ async function fill(wb, data, opts = {}) {
       if (f.kind === 'table') fillTable(f, value, put, key);
       else if (f.kind === 'split' || f.kind === 'digits') fillParts(f, value, put, key);
       else if (f.kind === 'choice_cells') fillChoiceCells(f, value, put, key, mark);
-      else {
+      else if (f.kind === 'checkbox') {
+        const ctl = controlOf(wb, f);
+        const on = truthy(value, f);
+        controls.set(ctl.shape_id, [ctl, on]);
+        report.written.push({ key, field: f.id, cell: `${f.sheet}!${f.range}`, value: on, control: ctl.shape_id });
+      } else {
         if (f.kind === 'inline_date' && placeholderDates(f.template || '').length > 1 && parseDate(value) !== null) {
           report.warnings.push(`${key}: 期間の欄に日付が1つだけです（終了日は空欄のまま）`);
         }
@@ -2573,7 +2739,7 @@ async function fill(wb, data, opts = {}) {
   if (strict && report.unknown_keys.length) throw new FillError(`unknown keys: ${report.unknown_keys.join(', ')}`);
   let bytes = null;
   if (!report.errors.length) {
-    try { bytes = await saveWithUpdates(wb, updates); }
+    try { bytes = await saveWithUpdates(wb, updates, true, [...controls.values()]); }
     catch (e) { if (e instanceof WriteError) report.errors.push(e.message); else throw e; }
     if (bytes) {
       report.verified = await verify(bytes, report.written, report.errors);
@@ -2607,7 +2773,7 @@ function farOutside(sheet, ref) {
  * ==================================================================== */
 const KIND_JA = {
   text: 'テキスト', date: '日付', inline_date: '日付(セル内)', choice: '選択', inline_text: 'テキスト(セル内)', table: '表',
-  circle: '選択(○で囲む)', choice_cells: '選択(□別セル)', pattern: '書式入り(〒・電話・時刻)', split: '分割欄', digits: '1文字1マス',
+  circle: '選択(○で囲む)', choice_cells: '選択(□別セル)', pattern: '書式入り(〒・電話・時刻)', split: '分割欄', digits: '1文字1マス', checkbox: 'チェックボックス',
 };
 function cellMd(text) { return text.replace(/\|/g, '\\|').replace(/\n/g, ' '); }
 function pyTruthy(v) {
@@ -2635,6 +2801,10 @@ function currentValue(sheet, f) {
     const vals = f.parts.map((p) => at(p.cell));
     if (vals.every((v) => v === null || v === '')) return null;
     return vals.map((v, i) => `${v === null ? '' : pyStr(v)}${f.parts[i].suffix || ''}`).join('');
+  }
+  if (f.kind === 'checkbox') {
+    const sid = f.parts.length ? f.parts[0].control : undefined;
+    return sheet.controls.some((c) => c.shape_id === sid && c.checked) ? true : null;
   }
   if (f.kind === 'choice_cells') {
     const sel = f.parts.filter((p) => { const v = at(p.cell); return CHECKED_CHARS.includes(pyTruthy(v) ? pyStr(v) : ''); }).map((p) => p.option);
@@ -2742,6 +2912,7 @@ const $ = (sel) => document.querySelector(sel);
 const KIND_UI = {
   text: 'テキスト', date: '日付', inline_date: '日付', choice: '選択', choice_cells: '選択', circle: '○で囲む',
   inline_text: 'セル内記入', pattern: '書式つき記入', split: '分割記入', digits: '1マス1文字', table: '表',
+  checkbox: 'チェックボックス',
 };
 
 const state = {
@@ -2872,15 +3043,29 @@ function renderField(f) {
   else if (f.kind === 'choice' || f.kind === 'choice_cells' || f.kind === 'circle') ctrl = choiceCtrl(f, id, body);
   else if (f.kind === 'date' || f.kind === 'inline_date') ctrl = dateCtrl(f, id, body);
   else if (f.kind === 'split') ctrl = splitCtrl(f, id, body);
+  else if (f.kind === 'checkbox') ctrl = checkboxCtrl(f, id, body);
   else ctrl = textCtrl(f, id, body);
   const hints = [];
   if (f.template && f.kind !== 'choice' && f.kind !== 'circle') hints.push(`元の表示: ${f.template.replace(/\n/g, ' ')}`);
-  if (f.value !== null && f.value !== undefined && f.value !== '' && f.kind !== 'table') hints.push(`現在の値: ${Array.isArray(f.value) ? f.value.join('・') : M.pyStr(f.value)}（空欄のままなら変更しません）`);
+  if (f.kind === 'checkbox') { if (f.value === true) hints.push('現在: チェックあり（「変更しない」のままなら、そのまま残します）'); }
+  else if (f.value !== null && f.value !== undefined && f.value !== '' && f.kind !== 'table') hints.push(`現在の値: ${Array.isArray(f.value) ? f.value.join('・') : M.pyStr(f.value)}（空欄のままなら変更しません）`);
   if (f.id !== labelText) hints.push(`キー: ${f.id}`);
   for (const t of hints) body.append(h('div', { class: 'f-hint' }, t));
   ctrl.preview = preview;
   state.ctrls.set(f.id, ctrl);
   return h('div', { class: 'field', 'data-kind': f.kind }, head, body, preview);
+}
+
+function checkboxCtrl(f, id, body) {
+  // three states: leave the form as it is / tick / untick
+  const sel = h('select', { id },
+    h('option', { value: '' }, '変更しない'), h('option', { value: 'on' }, 'チェックする'), h('option', { value: 'off' }, 'チェックを外す'));
+  body.append(h('div', { class: 'f-row' }, sel));
+  const ctrl = makeCtrl(f,
+    () => (sel.value === 'on' ? true : sel.value === 'off' ? false : undefined),
+    (v) => { sel.value = v === true ? 'on' : v === false ? 'off' : ''; });
+  sel.addEventListener('change', () => ctrl.edited());
+  return ctrl;
 }
 
 function textCtrl(f, id, body) {

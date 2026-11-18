@@ -703,9 +703,9 @@ def save_with_updates(
             replaced[ctl.prop_part] = set_control_prop(cur.decode("utf-8"), checked).encode("utf-8")
             if ctl.vml_part:
                 raw = replaced.get(ctl.vml_part) or zin.read(ctl.vml_part)
-                enc = "utf-8" if raw[:200].lower().find(b"windows-1252") < 0 else "cp1252"
-                replaced[ctl.vml_part] = set_control_vml(raw.decode(enc, "replace"), ctl.shape_id,
-                                                         checked).encode(enc, "replace")
+                # latin-1 maps every byte to one char: the ASCII edit leaves all other bytes as they were
+                replaced[ctl.vml_part] = set_control_vml(raw.decode("latin-1"), ctl.shape_id,
+                                                         checked).encode("latin-1")
         if recalc and any(k in updates for k in replaced) and "xl/workbook.xml" in zin.namelist():
             replaced["xl/workbook.xml"] = _force_recalc(
                 zin.read("xl/workbook.xml").decode("utf-8")
