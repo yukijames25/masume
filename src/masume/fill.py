@@ -1,13 +1,18 @@
 """Fill detected form fields with values and write a new .xlsx."""
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from dataclasses import dataclass, field
 
 from . import ooxml
-from .detect import CHECK_CHARS, CHECKED_CHARS, Field, _DATE_PLACEHOLDER, _INLINE_BLANK, detect, normalize_label
+from .detect import (BOX_CHARS, Field, _INLINE_BLANK, detect, form_sheets, normalize_label,
+                     placeholder_dates)
 from .ooxml import Workbook, parse_ref
 from .wareki import parse_date, to_wareki, wareki_year_str
+
+ERA_ABBR = {"明治": "明", "大正": "大", "昭和": "昭", "平成": "平", "令和": "令"}
+_SPLIT = re.compile(r"[-－ー‐−/／:：.．\s　()（）]+")
 
 
 class FillError(Exception):
@@ -41,56 +46,130 @@ def _uses_wareki(wb: Workbook, sheet_name: str) -> bool:
     return False
 
 
-def format_date(value, template: str | None, wareki: bool) -> str:
-    d = parse_date(value)
-    if d is None:
+# --------------------------------------------------------------------------
+# value formatters
+# --------------------------------------------------------------------------
+def _era_text(era_tpl: str | None, d: _dt.date, wareki: bool) -> tuple[str, int | None]:
+    """Return (era prefix, year to print) — year None means 西暦."""
+    if era_tpl == "西暦" or (era_tpl is None and not wareki):
+        return ("西暦" if era_tpl == "西暦" else ""), None
+    name, y = to_wareki(d)
+    if era_tpl and re.search(r"[・･、/／]", era_tpl):
+        items = [x for x in re.split(r"[・･、/／\s　]+", era_tpl) if x]
+        if items and all(len(x) == 1 for x in items):
+            return ERA_ABBR.get(name, name), y
+    return name, y
+
+
+def _date_text(era: str, y: int | None, d: _dt.date) -> str:
+    if y is None:
+        return f"{era}{d.year}年{d.month}月{d.day}日"
+    return f"{era}{wareki_year_str(y)}年{d.month}月{d.day}日"
+
+
+def _age(born: _dt.date, today: _dt.date) -> int:
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+
+_RANGE_SEP = re.compile(r"\s*(?:[～〜~]|\s/\s|\s+to\s+)\s*")
+
+
+def format_date(value, template: str | None, wareki: bool, today: _dt.date | None = None) -> str:
+    """Render a date (or a from/to pair for ranges) into a placeholder template."""
+    if isinstance(value, dict):
+        values = [value.get("from") or value.get("start"), value.get("to") or value.get("end")]
+    elif isinstance(value, (list, tuple)):
+        values = list(value)
+    elif isinstance(value, str) and _RANGE_SEP.search(value):
+        values = _RANGE_SEP.split(value.strip())
+    else:
+        values = [value]
+    dates = [parse_date(v) for v in values]
+    if not dates or any(d is None for d in dates):
         return str(value)
-    if template:
-        m = _DATE_PLACEHOLDER.match(template)
-        if m:
-            era = m.group("era")
-            pre = m.group("pre") or ""
-            post = m.group("post") or ""
-            if era == "西暦" or (era is None and not wareki):
-                body = f"{d.year}年{d.month}月{d.day}日"
-                if era == "西暦":
-                    body = "西暦" + body
-            else:
-                name, y = to_wareki(d)
-                body = f"{name}{wareki_year_str(y)}年{d.month}月{d.day}日"
-            return f"{pre}{body}{post}"
-    if wareki:
-        name, y = to_wareki(d)
-        return f"{name}{wareki_year_str(y)}年{d.month}月{d.day}日"
-    return f"{d.year}年{d.month}月{d.day}日"
+    today = today or _dt.date.today()
+    ms = placeholder_dates(template) if template else []
+    if not ms:
+        era, y = _era_text(None, dates[0], wareki)
+        return _date_text(era, y, dates[0])
+    if len(dates) > len(ms):
+        raise FillError(f"form has {len(ms)} date slot(s), got {len(dates)} dates")
+    out = []
+    pos = 0
+    for m, d in zip(ms, dates):
+        era, y = _era_text(m.group("era"), d, wareki)
+        out.append(template[pos:m.start()])
+        out.append(_date_text(era, y, d))
+        pos = m.end()
+    out.append(template[pos:])
+    text = "".join(out)
+    # （満　　歳） -> age,  （　　日間） -> inclusive length of a range
+    text = re.sub(r"満[\s　]+歳", lambda _: f"満{_age(dates[0], today)}歳", text, count=1)
+    if len(dates) >= 2:
+        days = (dates[1] - dates[0]).days + 1
+        text = re.sub(r"[（(][\s　]+日間[）)]", f"（{days}日間）", text, count=1)
+    return text
 
 
 def format_choice(template: str, selected, mark: str = "■") -> str:
+    extra: dict[str, str] = {}
+    if isinstance(selected, dict):  # {"その他": "親戚"}
+        extra = {normalize_label(k): str(v) for k, v in selected.items() if v not in (None, True, False, "")}
+        selected = [k for k, v in selected.items() if v not in (None, False)]
     if isinstance(selected, str):
         selected = [selected]
-    selected = [normalize_label(s) for s in selected]
+    sel = []
+    for s in selected:
+        m = re.match(r"^(.+?)[（(](.+)[）)]$", str(s))
+        if m:  # "その他（親戚）"
+            extra[normalize_label(m.group(1))] = m.group(2)
+            s = m.group(1)
+        sel.append(normalize_label(s))
     out = []
     i = 0
     found: set[str] = set()
-    boxes = CHECK_CHARS + CHECKED_CHARS
     while i < len(template):
         ch = template[i]
-        if ch in boxes:
-            m = re.match(r"[" + boxes + r"]\s*([^" + boxes + r"\s　（）()、,，]+)", template[i:])
+        if ch in BOX_CHARS:
+            m = re.match(r"[" + BOX_CHARS + r"]\s*([^" + BOX_CHARS + r"\s　（）()、,，]+)", template[i:])
             opt = normalize_label(m.group(1)) if m else ""
-            if opt in selected:
+            if opt in sel:
                 out.append(mark)
                 found.add(opt)
+                if opt in extra and m:
+                    j = i + m.end()
+                    pm = re.match(r"[\s　]*[（(][\s　]*[）)]", template[j:])
+                    if pm:
+                        out.append(template[i + 1:j] + f"（{extra[opt]}）")
+                        i = j + pm.end()
+                        continue
             else:
                 out.append("□")
             i += 1
             continue
         out.append(ch)
         i += 1
-    missing = [s for s in selected if s not in found]
+    missing = [s for s in sel if s not in found]
     if missing:
         raise FillError(f"option(s) not in form: {missing}")
     return "".join(out)
+
+
+def format_circle(template: str, options: list[str], selected) -> str:
+    """「男 ・ 女」 + "女" -> 「男 ・ （女）」 (cells cannot hold a drawn circle)."""
+    sel = normalize_label(selected if isinstance(selected, str) else selected[0])
+    norm = [normalize_label(o) for o in options]
+    if sel not in norm:
+        raise FillError(f"option not in form: {sel!r} (have {options})")
+    o = options[norm.index(sel)]
+    parts = re.split(r"([・･/／])", template)
+    for i, p in enumerate(parts):
+        if normalize_label(p) == sel:
+            lead = p[: len(p) - len(p.lstrip(" 　"))]
+            trail = p[len(p.rstrip(" 　")):]
+            parts[i] = f"{lead}（{o}）{trail}"
+            break
+    return "".join(parts)
 
 
 def format_inline(template: str, value) -> str:
@@ -101,17 +180,69 @@ def format_inline(template: str, value) -> str:
     return template[:start] + str(value) + template[end:]
 
 
+def _split_value(value, n: int) -> list:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    s = str(value).strip()
+    parts = [p for p in _SPLIT.split(s) if p != ""]
+    if len(parts) != n:
+        nums = re.findall(r"\d+", s)
+        if len(nums) == n:
+            parts = nums
+    return parts
+
+
+def format_pattern(template: str, value) -> str:
+    """「〒　　－」+ "123-4567" -> 「〒123－4567」;  「　時　分」+ "9:30" -> 「9時30分」"""
+    slots = [(m.start(), m.end()) for m in re.finditer(r"[\s　]+", template)]
+    body = template.rstrip(" 　")
+    if body and body[-1] in "－-ー‐−" :
+        end = len(body)
+        slots = [s for s in slots if s[0] < end] + [(end, len(template))]
+    parts = _split_value(value, len(slots))
+    if len(parts) == len(slots):
+        out, pos = [], 0
+        for (a, b), p in zip(slots, parts):
+            out.append(template[pos:a])
+            out.append(str(p))
+            pos = b
+        out.append(template[pos:])
+        return "".join(out)
+    if slots and len(parts) == 1:
+        a, b = slots[0] if len(slots) == 1 else max(slots, key=lambda s: s[1] - s[0])
+        return template[:a] + str(parts[0]) + template[b:]
+    raise FillError(f"cannot fit {value!r} into {template!r} ({len(slots)} blanks); pass a list")
+
+
+def _num(v):
+    if isinstance(v, str) and re.fullmatch(r"[1-9]\d{0,14}|0", v):
+        return int(v)
+    return v
+
+
+# --------------------------------------------------------------------------
 def resolve(fields: list[Field], key: str) -> Field | None:
     for f in fields:
         if f.id == key:
             return f
+    pool = fields
+    if "!" in key:
+        sname, rest = key.split("!", 1)
+        sub = [f for f in fields if f.sheet == sname]
+        if sub:
+            pool, key = sub, rest
+            for f in pool:
+                if f.id in (key, f"{sname}!{key}"):
+                    return f
     nk = normalize_label(key)
-    cand = [f for f in fields if normalize_label(f.label) == nk]
-    if len(cand) == 1:
-        return cand[0]
-    cand = [f for f in fields if f.id.split("/")[-1].split("#")[0] == nk]
-    if len(cand) == 1:
-        return cand[0]
+    for getter in (
+        lambda f: f.id.split("!")[-1],
+        lambda f: normalize_label(f.label),
+        lambda f: f.id.split("!")[-1].split("/")[-1].split("#")[0],
+    ):
+        cand = [f for f in pool if getter(f) == nk]
+        if len(cand) == 1:
+            return cand[0]
     return None
 
 
@@ -126,6 +257,7 @@ def fill(
     mark: str = "■",
     strict: bool = False,
     fields: list[Field] | None = None,
+    today: _dt.date | None = None,
 ) -> FillReport:
     """Fill *src* into *dst*. Pass *fields* (e.g. a corrected, saved field
     definition list) to skip automatic detection."""
@@ -135,7 +267,7 @@ def fill(
     report = FillReport()
     updates: dict[str, dict[tuple[int, int], object]] = {}
     sheet_path = {s.name: s.path for s in wb.sheets}
-    default_sheet = wb.sheet(sheet).name
+    default_sheet = wb.sheet(sheet).name if sheet else form_sheets(wb)[0].name
     touched: set[str] = set()
 
     def put(sheet_name: str, ref: str, value, key: str, fid: str | None):
@@ -160,20 +292,12 @@ def fill(
         try:
             if f.kind == "table":
                 _fill_table(f, value, put, key)
-                continue
-            if value is None:
-                v = None
-            elif f.kind == "inline_date":
-                v = format_date(value, f.template, _uses_wareki(wb, f.sheet))
-            elif f.kind == "date":
-                v = format_date(value, None, _uses_wareki(wb, f.sheet)) if parse_date(value) else value
-            elif f.kind == "choice":
-                v = format_choice(f.template or "", value, mark)
-            elif f.kind == "inline_text":
-                v = format_inline(f.template or "", value)
+            elif f.kind in ("split", "digits"):
+                _fill_parts(f, value, put, key)
+            elif f.kind == "choice_cells":
+                _fill_choice_cells(f, value, put, key, mark)
             else:
-                v = value
-            put(f.sheet, f.cell, v, key, f.id)
+                put(f.sheet, f.cell, _format_single(f, value, wb, mark, today), key, f.id)
         except FillError as e:
             report.errors.append(f"{key}: {e}")
 
@@ -188,6 +312,61 @@ def fill(
         else:
             report.verified = _verify(dst, report.written, report.errors)
     return report
+
+
+def _format_single(f: Field, value, wb: Workbook, mark: str, today):
+    if value is None:
+        return None
+    if f.kind == "inline_date":
+        return format_date(value, f.template, _uses_wareki(wb, f.sheet), today)
+    if f.kind == "date":
+        return format_date(value, None, _uses_wareki(wb, f.sheet), today) if parse_date(value) else value
+    if f.kind == "choice":
+        return format_choice(f.template or "", value, mark)
+    if f.kind == "circle":
+        return format_circle(f.template or "", f.options, value)
+    if f.kind == "inline_text":
+        return format_inline(f.template or "", value)
+    if f.kind == "pattern":
+        return format_pattern(f.template or "", value)
+    return value
+
+
+def _fill_parts(f: Field, value, put, key: str) -> None:
+    n = len(f.parts)
+    if f.kind == "digits":
+        chars = list(value) if isinstance(value, (list, tuple)) else list(re.sub(r"[-－ー‐−\s　]", "", str(value)))
+        if len(chars) > n:
+            raise FillError(f"{len(chars)} characters do not fit into {n} boxes")
+        for p, ch in zip(f.parts, chars):
+            put(f.sheet, p["cell"], _num(ch) if isinstance(ch, str) else ch, key, f.id)
+        return
+    if isinstance(value, dict):
+        by_suffix = {normalize_label(p.get("suffix") or ""): p for p in f.parts}
+        for k, v in value.items():
+            p = by_suffix.get(normalize_label(k))
+            if p is None:
+                raise FillError(f"unknown part {k!r} (have {[p.get('suffix') for p in f.parts]})")
+            put(f.sheet, p["cell"], _num(v) if isinstance(v, str) else v, key, f.id)
+        return
+    parts = _split_value(value, n)
+    if len(parts) == 1 and n == 2 and re.fullmatch(r"\d{7}", str(parts[0])):
+        parts = [parts[0][:3], parts[0][3:]]  # 郵便番号 1000001 -> 100 / 0001
+    if len(parts) != n:
+        raise FillError(f"expected {n} parts {[p.get('suffix') for p in f.parts]}, got {parts!r}")
+    for p, v in zip(f.parts, parts):
+        put(f.sheet, p["cell"], _num(v) if isinstance(v, str) else v, key, f.id)
+
+
+def _fill_choice_cells(f: Field, value, put, key: str, mark: str) -> None:
+    sel = [value] if isinstance(value, str) else list(value)
+    sel_n = [normalize_label(s) for s in sel]
+    opts = [normalize_label(p["option"]) for p in f.parts]
+    missing = [s for s in sel_n if s not in opts]
+    if missing:
+        raise FillError(f"option(s) not in form: {missing}")
+    for p, o in zip(f.parts, opts):
+        put(f.sheet, p["cell"], mark if o in sel_n else "□", key, f.id)
 
 
 def _verify(dst: str, written: list[dict], errors: list[str]) -> bool:

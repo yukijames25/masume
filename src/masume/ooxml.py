@@ -103,10 +103,21 @@ class Sheet:
 
 
 @dataclass
+class Styles:
+    bordered: set[int] = field(default_factory=set)  # cellXfs indices drawing any border
+    sides: dict[int, frozenset] = field(default_factory=dict)  # cellXfs index -> {"left",...}
+    heading: set[int] = field(default_factory=set)  # bold or large font (titles / headings)
+
+
+@dataclass
 class Workbook:
     path: str
     sheets: list[Sheet]
-    bordered_styles: set[int]  # cellXfs indices that draw at least one border
+    styles: Styles
+
+    @property
+    def bordered_styles(self) -> set[int]:
+        return self.styles.bordered
 
     def sheet(self, name: str | None = None) -> Sheet:
         if name is None:
@@ -144,29 +155,45 @@ def _resolve(base_dir: str, target: str) -> str:
     return posixpath.normpath(posixpath.join(base_dir, target))
 
 
-def _bordered_styles(zf: zipfile.ZipFile) -> set[int]:
+def _read_styles(zf: zipfile.ZipFile) -> Styles:
+    st = Styles()
     try:
         root = ET.fromstring(zf.read("xl/styles.xml"))
     except KeyError:
-        return set()
+        return st
+    border_sides: list[frozenset] = []
     borders = root.find(_N + "borders")
-    has_border: list[bool] = []
     if borders is not None:
         for b in borders.findall(_N + "border"):
-            drawn = False
+            sides = set()
             for side in ("left", "right", "top", "bottom"):
                 el = b.find(_N + side)
                 if el is not None and el.get("style") not in (None, "none"):
-                    drawn = True
-            has_border.append(drawn)
-    out: set[int] = set()
+                    sides.add(side)
+            border_sides.append(frozenset(sides))
+    heading_fonts: set[int] = set()
+    fonts = root.find(_N + "fonts")
+    if fonts is not None:
+        for i, f in enumerate(fonts.findall(_N + "font")):
+            b = f.find(_N + "b")
+            sz = f.find(_N + "sz")
+            bold = b is not None and b.get("val", "1") not in ("0", "false")
+            try:
+                big = sz is not None and float(sz.get("val", "11")) >= 14
+            except ValueError:
+                big = False
+            if bold or big:
+                heading_fonts.add(i)
     xfs = root.find(_N + "cellXfs")
     if xfs is not None:
         for i, xf in enumerate(xfs.findall(_N + "xf")):
             bid = int(xf.get("borderId", "0"))
-            if bid < len(has_border) and has_border[bid]:
-                out.add(i)
-    return out
+            if bid < len(border_sides) and border_sides[bid]:
+                st.bordered.add(i)
+                st.sides[i] = border_sides[bid]
+            if int(xf.get("fontId", "0")) in heading_fonts:
+                st.heading.add(i)
+    return st
 
 
 def load(path: str) -> Workbook:
@@ -197,7 +224,7 @@ def load(path: str) -> Workbook:
             )
             _read_sheet(zf.read(spath), sheet, shared)
             sheets.append(sheet)
-        return Workbook(path=path, sheets=sheets, bordered_styles=_bordered_styles(zf))
+        return Workbook(path=path, sheets=sheets, styles=_read_styles(zf))
 
 
 def _read_sheet(data: bytes, sheet: Sheet, shared: list[str]) -> None:

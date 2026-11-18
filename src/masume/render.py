@@ -20,7 +20,7 @@ def _cell_md(text: str) -> str:
 
 def sheet_to_markdown(wb: Workbook, sheet_name: str | None = None, layout: bool = True) -> str:
     sheet = wb.sheet(sheet_name)
-    fields = detect_sheet(sheet, wb.bordered_styles)
+    fields = detect_sheet(sheet, wb.styles)
     lines = [f"# {sheet.name}", ""]
 
     lines += ["## 入力欄", "", "| id | 種類 | セル | 補足 |", "|---|---|---|---|"]
@@ -40,7 +40,7 @@ def sheet_to_markdown(wb: Workbook, sheet_name: str | None = None, layout: bool 
     lines.append("")
 
     if layout:
-        g = Grid(sheet, wb.bordered_styles)
+        g = Grid(sheet, wb.styles)
         box_refs = {f.cell for f in fields if f.kind in ("text", "date")}
         by_row: dict[int, list] = {}
         for reg in g.regions():

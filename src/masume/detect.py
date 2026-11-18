@@ -1,8 +1,15 @@
 """Heuristic detection of input fields in Japanese "Excel 方眼紙" forms.
 
-The idea: an Excel 方眼紙 form is a grid of tiny cells where the author used
-*merged ranges* to draw labels and input boxes. We rebuild those logical
-"regions" and then pair every label with the empty box next to (or under) it.
+An Excel 方眼紙 form is a grid of tiny cells where the author used *merged
+ranges* and borders to draw labels and input boxes. We rebuild those logical
+"regions" and pair every label with the box next to (or under) it, and we
+recognise the conventions Japanese forms print *inside* boxes:
+
+* □ checkboxes (in one cell, or one □ per cell), 男 ・ 女 circle-one choices
+* date placeholders 「令和　年　月　日」, era lists 「昭和・平成　年…」, ranges 「～」
+* fill-in templates 「〒　　－」「（　）　－」「　時　分」, underscores 「＿＿」
+* split boxes 「[ ]年[ ]ヶ月」「[ ]－[ ]－[ ]」, one-digit-per-cell boxes
+* repeating tables (明細, 学歴・職歴), honorific boxes 「[ ]御中」
 """
 from __future__ import annotations
 
@@ -10,27 +17,61 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from .ooxml import Sheet, Workbook, idx_to_col, make_ref
+from .ooxml import Sheet, Styles, Workbook, col_to_idx, idx_to_col, make_ref
 
 CHECK_CHARS = "□☐"
 CHECKED_CHARS = "■☑☒✓✔"
+BOX_CHARS = CHECK_CHARS + CHECKED_CHARS
+HEADING_MARKS = "■●◆◇▼▽▲△★☆◎"
 
-_SPACES = re.compile(r"[\s　]+")
-_TRAIL = re.compile(r"[：:＊*※]+$")
+_SP = r"[\s　]"
+_SPACES = re.compile(_SP + "+")
+_ERA = r"(?:明治|大正|昭和|平成|令和|明|大|昭|平|令)"
+_DATE_ONE = re.compile(
+    rf"(?P<era>西暦|{_ERA}(?:{_SP}*[・･、/／]{_SP}*{_ERA})*)?{_SP}*(?P<y>\d*){_SP}*年"
+    rf"(?P<g1>{_SP}*)(?P<m>\d*){_SP}*月(?P<g2>{_SP}*)(?P<d>\d*){_SP}*日"
+)
+# kept for backwards compatibility (single placeholder, with pre/post text)
 _DATE_PLACEHOLDER = re.compile(
-    r"^(?P<pre>.*?)(?P<era>令和|平成|昭和|西暦)?[\s　]*(?P<y>\d*)[\s　]*年"
-    r"[\s　]*(?P<m>\d*)[\s　]*月[\s　]*(?P<d>\d*)[\s　]*日(?P<post>.*)$",
+    rf"^(?P<pre>.*?)(?P<era>西暦|{_ERA}(?:{_SP}*[・･、/／]{_SP}*{_ERA})*)?{_SP}*(?P<y>\d*){_SP}*年"
+    rf"{_SP}*(?P<m>\d*){_SP}*月{_SP}*(?P<d>\d*){_SP}*日(?P<post>.*)$",
     re.S,
 )
 _INLINE_BLANK = re.compile(r"^(?P<label>[^_＿]{1,30}?)[：:]?[\s　]*(?P<blank>[_＿]{2,})(?P<post>.*)$", re.S)
-_OPTION = re.compile(r"[□☐■☑☒]\s*([^□☐■☑☒\s　（）()、,，]+)")
+_OPTION = re.compile(r"[□☐■☑☒✓✔]\s*([^□☐■☑☒✓✔\s　（）()、,，]+)")
 _INDEX_HEADER = {"no", "no.", "№", "番号", "項番", "#", "ｎｏ", "ｎｏ．"}
+_TOTAL_WORDS = {"合計", "小計", "計", "総計", "以上", "合計金額"}
+_EXAMPLE_SHEET = re.compile(r"記入例|見本|サンプル|example|sample", re.I)
+_SEP_CHARS = "－-ー‐−/／:：.．"
+_TEMPLATE_CHARS = set("〒－-ー‐−()（）:：時分秒年月日歳満生・～〜/／.．") | set(_SEP_CHARS)
+UNIT_TOKENS = {
+    "年", "月", "日", "歳", "才", "円", "万円", "千円", "ヶ月", "か月", "カ月", "箇月", "ケ月",
+    "時", "分", "秒", "人", "名", "枚", "件", "通", "部", "冊", "台", "回", "号", "番", "番地",
+    "丁目", "階", "泊", "日間", "週間", "%", "％", "kg", "cm", "円/月",
+    "－", "-", "ー", "‐", "−", "〒", "～", "〜", "・", "：", ":", "／", "/", "(", ")", "（", "）",
+    "様", "御中", "殿", "印", "㊞",
+}
+HONORIFICS = {"様", "御中", "殿"}
+CIRCLE_VOCAB = {
+    "男", "女", "男性", "女性", "有", "無", "あり", "なし", "有り", "無し", "要", "不要", "可", "否",
+    "はい", "いいえ", "済", "未", "新規", "更新", "変更", "継続", "自宅", "勤務先", "本人", "代理人",
+    "明", "大", "昭", "平", "令", "明治", "大正", "昭和", "平成", "令和", "同意する", "同意しない",
+    "普通", "当座", "既婚", "未婚", "持家", "借家", "賛成", "反対", "出席", "欠席",
+}
+_FURIGANA = {"ふりがな", "フリガナ", "よみがな", "ヨミガナ"}
 
 
 def normalize_label(text: str) -> str:
     t = _SPACES.sub("", str(text))
-    t = _TRAIL.sub("", t)
-    t = t.strip("（）()【】[]「」")
+    t = t.lstrip("※＊*")
+    t = re.sub(r"[：:＊*※]+$", "", t)
+    pairs = {"（": "）", "(": ")", "【": "】", "[": "]", "「": "」", "〔": "〕"}
+    # strip brackets only when ONE matching pair encloses the whole label
+    while len(t) >= 2 and t[0] in pairs and t[-1] == pairs[t[0]] and t.count(t[0]) == 1:
+        t = t[1:-1]
+    for ch in HEADING_MARKS:
+        if t.startswith(ch):
+            t = t[1:]
     return t
 
 
@@ -44,6 +85,8 @@ class Region:
     merged: bool
     bordered: bool
     formula: bool = False
+    style: int = 0
+    sides: frozenset = frozenset()
 
     @property
     def ref(self) -> str:
@@ -66,6 +109,10 @@ class Region:
     def width(self) -> int:
         return self.c2 - self.c1 + 1
 
+    @property
+    def height(self) -> int:
+        return self.r2 - self.r1 + 1
+
 
 @dataclass
 class Field:
@@ -74,13 +121,16 @@ class Field:
     sheet: str
     cell: str
     range: str
-    kind: str  # text | date | choice | inline_text | inline_date | table
+    kind: str  # text | date | choice | choice_cells | circle | inline_text | inline_date | pattern | split | digits | table
     section: str | None = None
     options: list[str] = field(default_factory=list)
     columns: list[dict] = field(default_factory=list)
     rows: list[int] = field(default_factory=list)
+    parts: list[dict] = field(default_factory=list)  # split / digits / choice_cells
     template: str | None = None  # original cell text for inline kinds
-    value: object = None  # current value (only meaningful for filled forms)
+    suffix: str | None = None  # unit printed after the box (円, 歳, 様 ...)
+    value: object = None  # current value when the form is already filled
+    id_hint: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "Field":
@@ -92,7 +142,8 @@ class Field:
             id=d["id"], label=d.get("label", d["id"]), sheet=d["sheet"], cell=d["cell"],
             range=d.get("range", d["cell"]), kind=d.get("kind", "text"), section=d.get("section"),
             options=list(d.get("options") or []), columns=list(d.get("columns") or []),
-            rows=list(rows), template=d.get("template"),
+            rows=list(rows), parts=list(d.get("parts") or []), template=d.get("template"),
+            suffix=d.get("suffix"), value=d.get("value"),
         )
 
     def to_dict(self) -> dict:
@@ -112,27 +163,36 @@ class Field:
             d["columns"] = self.columns
             d["max_rows"] = len(self.rows)
             d["rows"] = self.rows
+        if self.parts:
+            d["parts"] = self.parts
         if self.template is not None:
             d["template"] = self.template
+        if self.suffix:
+            d["suffix"] = self.suffix
+        if self.value not in (None, ""):
+            d["value"] = self.value
         return d
 
 
 class Grid:
-    def __init__(self, sheet: Sheet, bordered_styles: set[int]):
+    def __init__(self, sheet: Sheet, styles: Styles | set[int]):
+        if not isinstance(styles, Styles):
+            styles = Styles(bordered=set(styles))
         self.sheet = sheet
-        self.bordered_styles = bordered_styles
+        self.styles = styles
         self.owner: dict[tuple[int, int], Region] = {}
         self.max_row = sheet.max_row
         self.max_col = sheet.max_col
         for (r1, c1, r2, c2) in sheet.merges:
             top = sheet.cells.get((r1, c1))
-            bordered = any(
-                (c := sheet.cells.get((r, cc))) is not None and c.style in bordered_styles
-                for r in range(r1, r2 + 1)
-                for cc in (c1, c2)
-            )
-            reg = Region(r1, c1, r2, c2, top.value if top else None, True, bordered,
-                         bool(top and top.formula is not None))
+            sides: set[str] = set()
+            for r in range(r1, r2 + 1):
+                for cc in range(c1, c2 + 1):
+                    c = sheet.cells.get((r, cc))
+                    if c is not None:
+                        sides |= styles.sides.get(c.style, frozenset())
+            reg = Region(r1, c1, r2, c2, top.value if top else None, True, bool(sides),
+                         bool(top and top.formula is not None), top.style if top else 0, frozenset(sides))
             for r in range(r1, r2 + 1):
                 for cc in range(c1, c2 + 1):
                     self.owner[(r, cc)] = reg
@@ -145,13 +205,17 @@ class Grid:
             return reg
         c = self.sheet.cells.get((row, col))
         value = c.value if c else None
-        bordered = bool(c and c.style in self.bordered_styles)
-        return Region(row, col, row, col, value, False, bordered,
-                      bool(c and c.formula is not None))
+        style = c.style if c else 0
+        sides = self.styles.sides.get(style, frozenset())
+        return Region(row, col, row, col, value, False, bool(sides),
+                      bool(c and c.formula is not None), style, sides)
 
     def at_or_blank(self, row: int, col: int) -> Region:
         reg = self.at(row, col)
         return reg if reg is not None else Region(row, col, row, col, None, False, False)
+
+    def heading_styled(self, reg: Region) -> bool:
+        return reg.style in self.styles.heading
 
     def regions(self) -> list[Region]:
         """All non-empty regions plus empty merged/bordered boxes, reading order."""
@@ -170,30 +234,95 @@ class Grid:
         return out
 
 
-def is_label(reg: Region) -> bool:
+# --------------------------------------------------------------------------
+# text classifiers
+# --------------------------------------------------------------------------
+def placeholder_dates(text: str) -> list[re.Match]:
+    """Date placeholders (with blank y/m/d) inside *text*."""
+    out = []
+    for m in _DATE_ONE.finditer(text):
+        if not (m.group("g1") or m.group("m")) or not (m.group("g2") or m.group("d")):
+            continue  # "生年月日" is a label, not a placeholder
+        if m.group("y") and m.group("m") and m.group("d"):
+            continue  # already filled
+        out.append(m)
+    return out
+
+
+def _is_placeholder_date(text: str) -> bool:
+    return bool(placeholder_dates(text))
+
+
+def is_unit(text: str) -> bool:
+    return normalize_label(text) in UNIT_TOKENS or text.strip() in UNIT_TOKENS
+
+
+def is_symbol_template(text: str) -> bool:
+    raw = str(text)
+    if not re.search(r"[\s　]{2,}|^[\s　]+\S|[\s　]\S*$", raw):
+        return False
+    residue = _SPACES.sub("", raw)
+    return bool(residue) and len(residue) <= 20 and all(ch in _TEMPLATE_CHARS for ch in residue)
+
+
+def is_template(text: str) -> bool:
+    """「〒　　－」「（　）　－」「　時　分」「銀行・信用金庫　　支店」"""
+    raw = str(text)
+    if not re.search(r"[\s　]{2,}|^[\s　]+\S", raw):
+        return False
+    residue = _SPACES.sub("", raw)
+    if not residue or len(residue) > 20:
+        return False
+    if all(ch in _TEMPLATE_CHARS for ch in residue):
+        return True
+    # words separated by wide blanks, e.g. 「銀行・信用金庫　　　支店」
+    tokens = [t for t in _SPACES.split(raw.strip()) if t]
+    if all(len(t) == 1 for t in tokens):
+        return False  # 均等割付 label such as 「氏　　名」
+    return len(tokens) >= 2 and all(len(t) <= 8 for t in tokens) and bool(re.search(r"[\s　]{3,}", raw))
+
+
+def circle_options(text: str) -> list[str] | None:
+    """「男 ・ 女」「有・無」 -> options, else None."""
+    t = text.strip()
+    if any(ch in t for ch in BOX_CHARS) or len(t) > 30 or not re.search(r"[・･/／]", t):
+        return None
+    parts = [p.strip(" 　") for p in re.split(r"[・･/／]", t)]
+    if not 2 <= len(parts) <= 6 or any(not p or len(p) > 6 or _SPACES.search(p) for p in parts):
+        return None
+    spaced = bool(re.search(r"[\s　][・･/／]|[・･/／][\s　]", t))
+    if spaced or all(p in CIRCLE_VOCAB for p in parts):
+        return parts
+    return None
+
+
+def choice_options(text: str) -> list[str]:
+    return _OPTION.findall(text)
+
+
+def is_label(reg: Region, maxlen: int = 40) -> bool:
     if reg.empty or reg.formula or not isinstance(reg.value, str):
         return False
     t = reg.text
-    if len(t) > 40:
+    if len(t) > maxlen:
         return False
-    if any(ch in t for ch in CHECK_CHARS + CHECKED_CHARS):
+    n_box = sum(t.count(ch) for ch in BOX_CHARS)
+    if n_box >= 2 or (n_box == 1 and t[0] not in BOX_CHARS):
         return False
-    if _DATE_PLACEHOLDER.match(t) and _is_placeholder_date(t):
+    if n_box == 1 and t[0] in CHECK_CHARS and len(t.strip()) <= 1:
         return False
-    if re.fullmatch(r"[\d,.\-+%円¥\s]+", t):
+    if _is_placeholder_date(t) or is_symbol_template(t) or circle_options(t):
+        return False
+    if re.fullmatch(r"[\d０-９,，.．\-－+＋%％円¥￥\s　]+", t):
+        return False
+    if is_unit(t):
         return False
     return True
 
 
-def _is_placeholder_date(text: str) -> bool:
-    m = _DATE_PLACEHOLDER.match(text)
-    if not m:
-        return False
-    seg = text[m.start("y"):m.start("post")]
-    # "生年月日" is a label, "令和　年　月　日" is a placeholder
-    if not re.search(r"年[\s　\d]+月[\s　\d]+日", seg):
-        return False
-    return not (m.group("y") and m.group("m") and m.group("d"))
+def has_heading_cue(text: str) -> bool:
+    t = text.strip()
+    return bool(t) and (t[0] in HEADING_MARKS or t.startswith("【") or bool(re.match(r"^第.{1,3}[章節部]", t)))
 
 
 def _is_box(reg: Region | None) -> bool:
@@ -204,22 +333,37 @@ def _date_like_label(label: str) -> bool:
     return label.endswith("日") or "年月日" in label or label in {"日付", "期日"}
 
 
+def _row_of(ref: str) -> int:
+    return int(re.sub(r"\D", "", ref))
+
+
+def _col_of(ref: str) -> int:
+    return col_to_idx(re.sub(r"\d", "", ref))
+
+
 # --------------------------------------------------------------------------
-def detect_sheet(sheet: Sheet, bordered_styles: set[int]) -> list[Field]:
-    g = Grid(sheet, bordered_styles)
+def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
+    g = Grid(sheet, styles)
     regions = g.regions()
     claimed: set[Region] = set()  # input boxes already paired
     used_labels: set[Region] = set()
     fields: list[Field] = []
 
-    def left_label(reg: Region) -> Region | None:
+    def free_label(reg: Region | None) -> bool:
+        return (reg is not None and is_label(reg) and reg not in used_labels
+                and reg not in claimed and not has_heading_cue(reg.text))
+
+    def left_label(reg: Region, row: int | None = None) -> Region | None:
+        row = reg.r1 if row is None else row
         c = reg.c1 - 1
         while c >= 1:
-            left = g.at(reg.r1, c)
+            left = g.at(row, c)
             if left is None:
                 return None
             if not left.empty:
-                return left if is_label(left) and left not in used_labels else None
+                if free_label(left) and not (g.heading_styled(left) and not left.bordered):
+                    return left
+                return None
             if left.merged or left.bordered:
                 return None
             c = left.c1 - 1
@@ -227,114 +371,317 @@ def detect_sheet(sheet: Sheet, bordered_styles: set[int]) -> list[Field]:
                 return None
         return None
 
+    def new(label, reg, kind, **kw) -> Field:
+        return Field("", label, sheet.name, reg.ref, reg.range, kind, **kw)
+
     # ---- 1. tables -------------------------------------------------------
     for tf, header_regs, body_regs in _detect_tables(g, regions):
         fields.append(tf)
         used_labels.update(header_regs)
         claimed.update(body_regs)
 
-    # ---- 2. inline kinds (dates / checkboxes / underscores) ---------------
+    # ---- 2. things printed inside cells ----------------------------------
     for reg in regions:
-        if reg in used_labels or reg.empty or not isinstance(reg.value, str):
+        if reg in used_labels or reg in claimed or reg.empty or not isinstance(reg.value, str):
             continue
         t = reg.text
-        if any(ch in t for ch in CHECK_CHARS + CHECKED_CHARS):
-            opts = _OPTION.findall(t)
+        n_box = sum(t.count(ch) for ch in BOX_CHARS)
+        if n_box == 1 and len(t) == 1:
+            res = _choice_cells(g, reg, claimed, used_labels)
+            if res is None:
+                continue
+            parts, option_regs = res
+            lab = left_label(reg)
+            label = lab.text if lab else "選択"
+            if lab:
+                used_labels.add(lab)
+            f = new(label, reg, "choice_cells", options=[p["option"] for p in parts], parts=parts)
+            f.range = f"{reg.ref}:{make_ref(option_regs[-1].r2, option_regs[-1].c2)}" if option_regs else reg.range
+            f.value = [p["option"] for p in parts if p.get("checked")] or None
+            for p in parts:
+                p.pop("checked", None)
+            fields.append(f)
+            claimed.add(reg)
+            claimed.update(option_regs)
+            continue
+        if n_box:
+            opts = choice_options(t)
             if not opts:
                 continue
-            first = min((t.find(ch) for ch in CHECK_CHARS + CHECKED_CHARS if ch in t))
+            lab = left_label(reg)
+            first = min(t.find(ch) for ch in BOX_CHARS if ch in t)
             label = t[:first].strip(" 　：:")
-            lab_reg = left_label(reg)
-            if not label and lab_reg is not None:
-                label = lab_reg.text
-                used_labels.add(lab_reg)
-            fields.append(Field("", label or "選択", sheet.name, reg.ref, reg.range,
-                                "choice", options=opts, template=str(reg.value)))
+            if len(opts) < 2 and lab is None and not label:
+                continue  # 「■ 申込者情報」 is a heading, not a checkbox
+            if not label and lab is not None:
+                label = lab.text
+            if lab is not None and label == lab.text:
+                used_labels.add(lab)
+            checked = [o for o in opts if re.search("[" + CHECKED_CHARS + r"]\s*" + re.escape(o), t)]
+            fields.append(new(label or "選択", reg, "choice", options=opts, template=str(reg.value),
+                              value=checked or None))
             claimed.add(reg)
-        elif _is_placeholder_date(t):
-            lab_reg = left_label(reg)
+            continue
+        if _is_placeholder_date(t):
+            lab = left_label(reg)
             m = _DATE_PLACEHOLDER.match(t)
-            label = (m.group("pre") or "").strip(" 　：:")
-            if not label and lab_reg is not None:
-                label = lab_reg.text
-                used_labels.add(lab_reg)
-            fields.append(Field("", label or "日付", sheet.name, reg.ref, reg.range,
-                                "inline_date", template=str(reg.value)))
+            label = (m.group("pre") or "").strip(" 　：:") if m else ""
+            label = re.sub(_ERA + r"$", "", label).strip(" 　：:・")
+            if not label and lab is not None:
+                label = lab.text
+                used_labels.add(lab)
+            if not label:
+                label = "記入日" if "現在" in t else "日付"
+            fields.append(new(label, reg, "inline_date", template=str(reg.value)))
             claimed.add(reg)
-        else:
-            m = _INLINE_BLANK.match(t)
-            if m:
-                fields.append(Field("", m.group("label").strip(), sheet.name, reg.ref,
-                                    reg.range, "inline_text", template=str(reg.value)))
-                claimed.add(reg)
-                used_labels.add(reg)
+            continue
+        lab = left_label(reg)
+        opts = circle_options(t) if lab is not None else None
+        if opts:
+            used_labels.add(lab)
+            fields.append(new(lab.text, reg, "circle", options=opts, template=str(reg.value)))
+            claimed.add(reg)
+            continue
+        if lab is not None and (reg.merged or reg.bordered) and is_template(t):
+            used_labels.add(lab)
+            fields.append(new(lab.text, reg, "pattern", template=str(reg.value)))
+            claimed.add(reg)
+            continue
+        if (lab is None and (reg.merged or reg.bordered) and is_template(t) and not is_symbol_template(t)
+                and not _is_box(g.at(reg.r1, reg.c2 + 1))):
+            last = [x for x in _SPACES.split(t) if x][-1]
+            fields.append(new(last, reg, "pattern", template=str(reg.value)))
+            claimed.add(reg)
+            used_labels.add(reg)
+            continue
+        m = _INLINE_BLANK.match(t)
+        if m:
+            fields.append(new(m.group("label").strip(), reg, "inline_text", template=str(reg.value)))
+            claimed.add(reg)
+            used_labels.add(reg)
 
-    labels = [r for r in regions if is_label(r) and r not in used_labels and r not in claimed]
+    labels = [r for r in regions if free_label(r)]
 
-    # ---- 3. label -> box on the right ------------------------------------
-    for lab in labels:
-        box = None
-        c = lab.c2 + 1
-        skipped = 0
-        while c <= g.max_col:
-            reg = g.at(lab.r1, c)
-            if reg is None or not reg.empty:
-                break
-            if (reg.merged or reg.bordered) and reg not in claimed:
-                box = reg
-                break
-            if reg in claimed:
-                break
-            # plain blank grid cell (方眼紙 spacer)
-            skipped += 1
-            if skipped > 2:
-                break
-            c = reg.c2 + 1
-        if box is None and lab.text.endswith(("：", ":")):
+    # ---- 3. label -> box(es) on the right --------------------------------
+    for lab in [r for r in regions if is_label(r) and not has_heading_cue(r.text) and r not in claimed]:
+        if lab in used_labels and lab.height == 1:
+            continue
+        if lab not in used_labels and lab not in labels:
+            continue
+        found_any = lab in used_labels
+        for row in range(lab.r1 + (1 if found_any else 0), lab.r2 + 1):
+            res = _scan_right(g, lab, row, claimed, used_labels)
+            if res is None:
+                continue
+            kind, boxes, prefix, suffixes = res
+            if row > lab.r1:
+                above = g.at(boxes[0].r1 - 1, boxes[0].c1)
+                if above is not None and above.r1 >= lab.r1 and is_label(above):
+                    continue  # box belongs to the header above it (決裁 | 部長 / stamp)
+            label = lab.text if not found_any else f"{lab.text}({row - lab.r1 + 1})"
+            f = _make_box_field(sheet, label, kind, boxes, prefix, suffixes)
+            fields.append(f)
+            claimed.update(boxes)
+            found_any = True
+        if found_any:
+            used_labels.add(lab)
+            continue
+        if lab.text.endswith(("：", ":")):
             nxt = g.at_or_blank(lab.r1, lab.c2 + 1)
             if nxt.empty and nxt not in claimed:
-                box = nxt
-        if box is not None:
-            claimed.add(box)
-            used_labels.add(lab)
-            fields.append(_box_field(sheet, lab, box))
+                claimed.add(nxt)
+                used_labels.add(lab)
+                fields.append(_make_box_field(sheet, lab.text, "text", [nxt], None, [None]))
+
+    # ---- 3b. [box] 御中 / 様 / 殿 ------------------------------------------
+    for reg in regions:
+        if reg.empty or not isinstance(reg.value, str) or reg.text not in HONORIFICS:
+            continue
+        left = g.at(reg.r1, reg.c1 - 1)
+        if _is_box(left) and left not in claimed:
+            claimed.add(left)
+            fields.append(_make_box_field(sheet, "宛名", "text", [left], None, [reg.text]))
 
     # ---- 4. label -> box below -------------------------------------------
-    for lab in labels:
+    long_labels = [r for r in regions if r not in used_labels and r not in claimed
+                   and is_label(r, maxlen=120) and not has_heading_cue(r.text)]
+    for lab in long_labels:
         if lab in used_labels:
             continue
         below = g.at(lab.r2 + 1, lab.c1)
-        if _is_box(below) and below not in claimed and below.c2 >= lab.c2:
+        if (_is_box(below) and below not in claimed and below.c1 == lab.c1
+                and below.c2 >= lab.c2):
             claimed.add(below)
             used_labels.add(lab)
-            fields.append(_box_field(sheet, lab, below))
+            fields.append(_make_box_field(sheet, lab.text, "text", [below], None, [None]))
 
-    # ---- 5. sections, ids --------------------------------------------------
-    headings = _headings(g, regions, used_labels, claimed)
+    # ---- 5. filled forms: label -> non-empty box on the right --------------
+    for lab in labels:
+        if lab in used_labels or lab in claimed:
+            continue
+        right = g.at(lab.r1, lab.c2 + 1)
+        if (right is None or right.empty or right in claimed or right in used_labels
+                or not (right.merged or right.bordered) or not isinstance(right.value, (str, int, float))
+                or g.heading_styled(right) or has_heading_cue(str(right.value))):
+            continue
+        if isinstance(right.value, str) and is_label(right):
+            after = g.at(right.r1, right.c2 + 1)
+            if _is_box(after) and after not in claimed:
+                continue  # right is itself a label with its own box
+        claimed.add(right)
+        used_labels.add(lab)
+        f = _make_box_field(sheet, lab.text, "text", [right], None, [None])
+        f.value = right.value
+        fields.append(f)
+
+    # ---- 6. furigana ids ----------------------------------------------------
     for f in fields:
-        r = int(re.sub(r"\D", "", f.cell))
+        if normalize_label(f.label) in _FURIGANA:
+            lab_reg = next((r for r in regions if r.text == f.label and r.r1 == _row_of(f.cell)), None)
+            if lab_reg is not None:
+                below = g.at(lab_reg.r2 + 1, lab_reg.c1)
+                if below is not None and is_label(below):
+                    f.id_hint = f"{normalize_label(below.text)}(ふりがな)"
+
+    # ---- 7. sections, ids ---------------------------------------------------
+    headings = _headings(g, regions, used_labels, claimed)
+    groups = _group_labels(g, regions, used_labels, claimed)
+    for f in fields:
+        r, c = _row_of(f.cell), _col_of(f.cell)
         sec = None
         for hr, text in headings:
             if hr <= r:
                 sec = text
             else:
                 break
+        for grp, text in groups:
+            if grp.r1 <= r <= grp.r2 and grp.c2 < c:
+                sec = text
         f.section = sec
-    fields.sort(key=lambda f: (int(re.sub(r"\D", "", f.cell)), _col_of(f.cell)))
+    fields.sort(key=lambda f: (_row_of(f.cell), _col_of(f.cell)))
     _assign_ids(fields)
     return fields
 
 
-def _col_of(ref: str) -> int:
-    from .ooxml import col_to_idx
+def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set):
+    """Find box(es) right of *lab* on *row*.
 
-    return col_to_idx(re.sub(r"\d", "", ref))
+    Returns (kind, boxes, prefix, suffixes) or None. Handles 〒 prefixes,
+    unit suffixes (円, 歳), split boxes ([ ]年[ ]ヶ月, [ ]－[ ]－[ ]) and
+    one-character-per-cell boxes (口座番号).
+    """
+    c = lab.c2 + 1
+    prefix = None
+    boxes: list[Region] = []
+    suffixes: list[str | None] = []
+    spacer = 0
+    while c <= g.max_col:
+        reg = g.at(row, c)
+        if reg is None or reg in claimed:
+            break
+        if reg.r1 != row and not (reg.r1 <= row <= reg.r2):
+            break
+        if reg.empty:
+            if reg.merged or reg.bordered:
+                if boxes and suffixes[-1] is None and not reg.merged and not boxes[-1].merged:
+                    # adjacent single cells: digits or underline run
+                    boxes.append(reg)
+                    suffixes.append(None)
+                    c = reg.c2 + 1
+                    continue
+                if boxes and suffixes[-1] is None:
+                    break  # two different boxes with nothing between: separate fields
+                boxes.append(reg)
+                suffixes.append(None)
+                spacer = 0
+                c = reg.c2 + 1
+                continue
+            spacer += 1
+            if spacer > 2:
+                break
+            c = reg.c2 + 1
+            continue
+        # non-empty region
+        if isinstance(reg.value, str) and is_unit(reg.text) and reg.text not in HONORIFICS or (
+                isinstance(reg.value, str) and reg.text in HONORIFICS and boxes):
+            if not boxes:
+                if prefix is None and len(reg.text) <= 2:
+                    prefix = reg.text
+                    c = reg.c2 + 1
+                    continue
+                break
+            if suffixes[-1] is None:
+                suffixes[-1] = reg.text
+                c = reg.c2 + 1
+                spacer = 0
+                continue
+            break
+        break
+    if not boxes:
+        return None
+    # trim trailing boxes that are not followed by a unit when we have a split
+    single_cells = [b for b in boxes if not b.merged]
+    if len(boxes) >= 3 and len(single_cells) == len(boxes) and all(s is None for s in suffixes):
+        sides = set().union(*(b.sides for b in boxes))
+        if {"left", "right"} & sides:
+            return "digits", boxes, prefix, suffixes
+        # underline drawn on unmerged cells -> one logical box
+        merged = Region(boxes[0].r1, boxes[0].c1, boxes[-1].r2, boxes[-1].c2, None, False, True)
+        return "underline", [merged] + boxes[1:], prefix, [None] * len(boxes)
+    if len(boxes) >= 2:
+        return "split", boxes, prefix, suffixes
+    return "text", boxes, prefix, suffixes
 
 
-def _box_field(sheet: Sheet, lab: Region, box: Region) -> Field:
-    label = lab.text
-    kind = "date" if _date_like_label(normalize_label(label)) else "text"
-    return Field("", label, sheet.name, box.ref, box.range, kind)
+def _make_box_field(sheet: Sheet, label: str, kind: str, boxes: list[Region], prefix, suffixes) -> Field:
+    first = boxes[0]
+    lab_norm = normalize_label(label)
+    if kind == "underline":
+        f = Field("", label, sheet.name, first.ref, first.range, "text")
+    elif kind in ("split", "digits"):
+        last = boxes[-1]
+        parts = []
+        for b, s in zip(boxes, suffixes):
+            p = {"cell": b.ref}
+            if s:
+                p["suffix"] = s
+            parts.append(p)
+        f = Field("", label, sheet.name, first.ref, f"{first.ref}:{make_ref(last.r2, last.c2)}", kind,
+                  parts=parts)
+    else:
+        kind2 = "date" if _date_like_label(lab_norm) else "text"
+        f = Field("", label, sheet.name, first.ref, first.range, kind2, suffix=suffixes[0] if suffixes else None)
+    return f
+
+
+def _choice_cells(g: Grid, start: Region, claimed: set, used: set):
+    """[□][男性][□][女性] -> parts."""
+    parts = []
+    option_regs = []
+    row = start.r1
+    c = start.c1
+    while True:
+        box = g.at(row, c)
+        gap = 0
+        while box is not None and box.empty and gap < 2:
+            gap += 1
+            c = box.c2 + 1
+            box = g.at(row, c)
+        if box is None or box.empty:
+            break
+        t = box.text
+        if not (len(t) == 1 and t in BOX_CHARS):
+            break
+        nxt = g.at(row, box.c2 + 1)
+        if nxt is None or nxt.empty or not isinstance(nxt.value, str) or any(ch in nxt.text for ch in BOX_CHARS):
+            break
+        parts.append({"cell": box.ref, "option": nxt.text.strip(), "checked": t in CHECKED_CHARS})
+        option_regs.append(nxt)
+        claimed.add(box)
+        c = nxt.c2 + 1
+    if not parts:
+        return None
+    return parts, option_regs
 
 
 def _headings(g: Grid, regions: Iterable[Region], used: set[Region], claimed: set[Region]):
@@ -348,17 +695,29 @@ def _headings(g: Grid, regions: Iterable[Region], used: set[Region], claimed: se
         if len(regs) != 1:
             continue
         reg = regs[0]
-        if reg in used or reg in claimed or not is_label(reg):
+        if reg in used or reg in claimed or not isinstance(reg.value, str):
             continue
         t = reg.text
         if len(t) > 30:
+            continue
+        if not (has_heading_cue(t) or g.heading_styled(reg)):
             continue
         out.append((r, normalize_label(t)))
     return out
 
 
+def _group_labels(g: Grid, regions: Iterable[Region], used: set[Region], claimed: set[Region]):
+    """Tall, narrow labels on the left (縦書き 請求者 / 必要な方) act as sections."""
+    out = []
+    for reg in regions:
+        if reg in used or reg in claimed or not is_label(reg) or reg.height < 3 or reg.width > 4:
+            continue
+        out.append((reg, normalize_label(reg.text)))
+    return out
+
+
 def _assign_ids(fields: list[Field]) -> None:
-    base = [normalize_label(f.label) or f.cell for f in fields]
+    base = [f.id_hint or normalize_label(f.label) or f.cell for f in fields]
     counts: dict[str, int] = {}
     for b in base:
         counts[b] = counts.get(b, 0) + 1
@@ -372,11 +731,6 @@ def _assign_ids(fields: list[Field]) -> None:
         if n > 1:
             fid = f"{fid}#{n}"
         f.id = fid
-    # second pass: section-qualified ids could still collide with #1 entries
-    ids = [f.id for f in fields]
-    for f in fields:
-        if ids.count(f.id) > 1:
-            pass  # extremely rare; ids stay usable via cell refs
 
 
 # --------------------------------------------------------------------------
@@ -386,20 +740,20 @@ def _detect_tables(g: Grid, regions: list[Region]):
     for reg in regions:
         by_row.setdefault(reg.r1, []).append(reg)
     consumed_rows: set[int] = set()
+    used_names: set[str] = set()
     for r in sorted(by_row):
         if r in consumed_rows:
             continue
         row_regs = sorted(by_row[r], key=lambda x: x.c1)
-        # find runs of horizontally contiguous label regions
         run: list[Region] = []
         runs: list[list[Region]] = []
         for reg in row_regs:
-            if is_label(reg) and (not run or reg.c1 == run[-1].c2 + 1):
+            if _is_header(reg) and (not run or reg.c1 == run[-1].c2 + 1):
                 run.append(reg)
             else:
                 if len(run) >= 2:
                     runs.append(run)
-                run = [reg] if is_label(reg) else []
+                run = [reg] if _is_header(reg) else []
         if len(run) >= 2:
             runs.append(run)
         for hdr in runs:
@@ -407,14 +761,17 @@ def _detect_tables(g: Grid, regions: list[Region]):
             if res is None:
                 continue
             body_rows, body_regs = res
-            cols = []
-            for h in hdr:
-                cols.append({"id": normalize_label(h.text), "label": h.text,
-                             "col": idx_to_col(h.c1)})
-            label = "表"
+            cols = [{"id": normalize_label(h.text), "label": h.text, "col": idx_to_col(h.c1)} for h in hdr]
+            label = None
             above = g.at(hdr[0].r1 - 1, hdr[0].c1)
-            if above is not None and is_label(above):
+            span = hdr[-1].c2 - hdr[0].c1 + 1
+            if above is not None and is_label(above) and above.width * 2 >= span:
                 label = above.text
+            if label is None:
+                label = max((h.text for h in hdr), key=len)
+            if normalize_label(label) in used_names:
+                label = f"{label}#{len(used_names) + 1}"
+            used_names.add(normalize_label(label))
             first = hdr[0]
             last_r = body_rows[-1]
             f = Field("", label, g.sheet.name, make_ref(body_rows[0], first.c1),
@@ -424,24 +781,43 @@ def _detect_tables(g: Grid, regions: list[Region]):
             yield f, set(hdr), body_regs
 
 
+def _is_header(reg: Region) -> bool:
+    if reg.empty or reg.formula or not isinstance(reg.value, str):
+        return False
+    t = reg.text
+    if len(t) > 20 or any(ch in t for ch in BOX_CHARS) or _is_placeholder_date(t) or is_symbol_template(t):
+        return False
+    if circle_options(t) or re.fullmatch(r"[\d０-９,，.．\-－+＋%％\s　]+", t):
+        return False
+    return t not in HONORIFICS and t not in ("－", "-", "〒", "～", "・")
+
+
 def _table_body(g: Grid, hdr: list[Region]):
     start = max(h.r2 for h in hdr) + 1
     rows: list[int] = []
     body_regs: set[Region] = set()
+    empty_rows = 0
     r = start
     while r <= g.max_row and len(rows) < 500:
         regs = [g.at(r, h.c1) for h in hdr]
         if any(x is None for x in regs):
             break
+        if any(x.r1 != r or x.c1 != h.c1 for x, h in zip(regs, hdr)):
+            break
         ok = True
         for i, (h, x) in enumerate(zip(hdr, regs)):
+            if x.formula:
+                ok = False
+                break
             if x.empty:
                 if not (x.merged or x.bordered):
                     ok = False
                     break
                 continue
-            # allow a pre-numbered index column
             if i == 0 and normalize_label(h.text).lower() in _INDEX_HEADER and re.fullmatch(r"\d+", x.text):
+                continue
+            # filled cells are allowed inside bordered tables, totals rows end it
+            if (x.merged or x.bordered) and normalize_label(x.text) not in _TOTAL_WORDS:
                 continue
             ok = False
             break
@@ -449,19 +825,32 @@ def _table_body(g: Grid, hdr: list[Region]):
             break
         rows.append(r)
         body_regs.update(regs)
+        if all(x.empty or (i == 0 and normalize_label(hdr[0].text).lower() in _INDEX_HEADER)
+               for i, x in enumerate(regs)):
+            empty_rows += 1
         r = max(x.r2 for x in regs) + 1
-    if len(rows) < 2:
+    # a real table has room left: at least one completely empty row
+    if len(rows) < 2 or empty_rows == 0:
         return None
     return rows, body_regs
 
 
+def is_example_sheet(name: str) -> bool:
+    return bool(_EXAMPLE_SHEET.search(name))
+
+
+def form_sheets(wb: Workbook) -> list[Sheet]:
+    visible = [s for s in wb.sheets if not s.hidden]
+    main = [s for s in visible if not is_example_sheet(s.name)]
+    return main or visible or wb.sheets[:1]
+
+
 def detect(wb: Workbook, sheet: str | None = None) -> list[Field]:
-    sheets = [wb.sheet(sheet)] if sheet else [s for s in wb.sheets if not s.hidden]
+    sheets = [wb.sheet(sheet)] if sheet else form_sheets(wb)
     out: list[Field] = []
     for s in sheets:
-        out.extend(detect_sheet(s, wb.bordered_styles))
+        out.extend(detect_sheet(s, wb.styles))
     if len({f.sheet for f in out}) > 1:
-        # make ids unique across sheets
         seen: dict[str, int] = {}
         for f in out:
             seen[f.id] = seen.get(f.id, 0) + 1
