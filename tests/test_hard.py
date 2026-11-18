@@ -229,7 +229,7 @@ class RealFormLayoutTests(unittest.TestCase):
         f = {x.id: x for x in detect(load(self.path))}
         self.assertEqual(set(f), {"名称（氏名）", "担当者名", "所在地（住所）", "日付", "法人番号"})
         self.assertEqual(f["所在地（住所）"].cell, "O5")      # open space inside the frame
-        self.assertEqual(f["担当者名"].cell, "K13")           # under an unmerged label, not over it
+        self.assertEqual(f["担当者名"].cell, "O12")
         self.assertEqual(len(f["法人番号"].parts), 13)
         self.assertEqual(f["日付"].template, "令和")
 

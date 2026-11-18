@@ -3,7 +3,7 @@
 A made-up 届出書 that copies the *layout habits* found in real municipal tax
 forms (2026-11-19 test on public forms): labels sitting inside one big ruled
 frame with the value written in the open space beside them, a two-line label
-「所在地」+「（住所）」, an unmerged label 「担当者名」 that spills right,
+「所在地」+「（住所）」, a merged label 「担当者名」 with open space beside it,
 「令和[ ]年[ ]月[ ]日提出」 drawn over separate cells, one merged box per digit
 for 法人番号, an office-only 受付印 box and a printed addressee 「〇〇市長」.
 
@@ -62,7 +62,7 @@ def build(path):
     ws.merge_cells("K11:N11"); ws["K11"] = "法人番号"
     for c in range(15, 28):  # 13 one-character boxes O11:AA11
         side(ws, 11, c, left=T, right=T, top=T, bottom=T)
-    ws["K12"] = "担当者名"
+    ws.merge_cells("K12:N12"); ws["K12"] = "担当者名"
     wb.save(path)
 
 

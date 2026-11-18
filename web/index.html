@@ -1360,13 +1360,13 @@ const RE_OPTION = new RegExp(`[□☐■☑☒✓✔][${WS}]*([^□☐■☑☒�
 const INDEX_HEADER = new Set(['no', 'no.', '№', '番号', '項番', '#', 'ｎｏ', 'ｎｏ．']);
 const TOTAL_WORDS = new Set(['合計', '小計', '計', '総計', '以上', '合計金額']);
 const RE_EXAMPLE_SHEET = /記入例|見本|サンプル|example|sample/i;
-const SEP_CHARS = '－-ー‐−/／:：.．';
+const SEP_CHARS = '－-ー‐−―/／:：.．';
 const TEMPLATE_CHARS = new Set([...'〒－-ー‐−()（）:：時分秒年月日歳満生・～〜/／.．', ...SEP_CHARS]);
 const UNIT_TOKENS = new Set([
   '年', '月', '日', '歳', '才', '円', '万円', '千円', 'ヶ月', 'か月', 'カ月', '箇月', 'ケ月',
   '時', '分', '秒', '人', '名', '枚', '件', '通', '部', '冊', '台', '回', '号', '番', '番地',
   '丁目', '階', '泊', '日間', '週間', '%', '％', 'kg', 'cm', '円/月',
-  '－', '-', 'ー', '‐', '−', '〒', '～', '〜', '・', '：', ':', '／', '/', '(', ')', '（', '）',
+  '－', '-', 'ー', '‐', '−', '―', '〒', '～', '〜', '・', '：', ':', '／', '/', '(', ')', '（', '）',
   '様', '御中', '殿', '印', '㊞',
 ]);
 const HONORIFICS = new Set(['様', '御中', '殿']);
@@ -1804,7 +1804,7 @@ function detectSheet(sheet, styles) {
   for (const lab of labels) {
     if (usedLabels.has(lab) || claimed.has(lab)) continue;
     const n = normalizeLabel(lab.text);
-    if (!(cpLen(n) >= 2 && cpLen(n) <= 10) || /[。、，,]/u.test(n) || g.headingStyled(lab)) continue;
+    if (!(cpLen(n) >= 2 && cpLen(n) <= 10) || /[。、，,]/u.test(n) || g.headingStyled(lab) || !lab.merged) continue;
     const upper = g.at(lab.r1 - 1, lab.c1);
     if (/^[（(]/u.test(lab.text) && upper !== null && usedLabels.has(upper) && upper.c1 === lab.c1 && upper.c2 === lab.c2) {
       usedLabels.add(lab); // 「所在地」+「（住所）」 on the next line: one label
@@ -1819,10 +1819,7 @@ function detectSheet(sheet, styles) {
       c = reg.c2 + 1;
     }
     if (free >= 4) {
-      let box = g.at(lab.r1, lab.c2 + 1);
-      const below = g.at(lab.r2 + 1, lab.c1);
-      if (!lab.merged && below !== null && below.empty && !below.merged && !claimed.has(below) &&
-          !lab.sides.has('bottom') && !below.sides.has('top')) box = below; // unmerged label spills right: write under it
+      const box = g.at(lab.r1, lab.c2 + 1);
       claimed.add(box);
       usedLabels.add(lab);
       fields.push(makeBoxField(sheet, lab.text, 'text', [box], null, [null]));

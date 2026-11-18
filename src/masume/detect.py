@@ -42,13 +42,13 @@ _OPTION = re.compile(r"[□☐■☑☒✓✔]\s*([^□☐■☑☒✓✔\s　�
 _INDEX_HEADER = {"no", "no.", "№", "番号", "項番", "#", "ｎｏ", "ｎｏ．"}
 _TOTAL_WORDS = {"合計", "小計", "計", "総計", "以上", "合計金額"}
 _EXAMPLE_SHEET = re.compile(r"記入例|見本|サンプル|example|sample", re.I)
-_SEP_CHARS = "－-ー‐−/／:：.．"
+_SEP_CHARS = "－-ー‐−―/／:：.．"
 _TEMPLATE_CHARS = set("〒－-ー‐−()（）:：時分秒年月日歳満生・～〜/／.．") | set(_SEP_CHARS)
 UNIT_TOKENS = {
     "年", "月", "日", "歳", "才", "円", "万円", "千円", "ヶ月", "か月", "カ月", "箇月", "ケ月",
     "時", "分", "秒", "人", "名", "枚", "件", "通", "部", "冊", "台", "回", "号", "番", "番地",
     "丁目", "階", "泊", "日間", "週間", "%", "％", "kg", "cm", "円/月",
-    "－", "-", "ー", "‐", "−", "〒", "～", "〜", "・", "：", ":", "／", "/", "(", ")", "（", "）",
+    "－", "-", "ー", "‐", "−", "―", "〒", "～", "〜", "・", "：", ":", "／", "/", "(", ")", "（", "）",
     "様", "御中", "殿", "印", "㊞",
 }
 HONORIFICS = {"様", "御中", "殿"}
@@ -566,7 +566,7 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
         if lab in used_labels or lab in claimed:
             continue
         n = normalize_label(lab.text)
-        if not 2 <= len(n) <= 10 or re.search(r"[。、，,]", n) or g.heading_styled(lab):
+        if not 2 <= len(n) <= 10 or re.search(r"[。、，,]", n) or g.heading_styled(lab) or not lab.merged:
             continue
         upper = g.at(lab.r1 - 1, lab.c1)
         if (lab.text.strip()[:1] in "（(" and upper is not None and upper in used_labels
@@ -586,10 +586,6 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
             c = reg.c2 + 1
         if free >= 4:
             box = g.at(lab.r1, lab.c2 + 1)
-            below = g.at(lab.r2 + 1, lab.c1)
-            if (not lab.merged and below is not None and below.empty and not below.merged
-                    and below not in claimed and "bottom" not in lab.sides and "top" not in below.sides):
-                box = below  # an unmerged label spills over the cells to its right: write under it
             claimed.add(box)
             used_labels.add(lab)
             fields.append(_make_box_field(sheet, lab.text, "text", [box], None, [None]))
