@@ -41,8 +41,8 @@ class HardFixtureTests(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_rirekisho(self):
         f = fmap("rirekisho")
-        for k in ("記入日", "氏名(ふりがな)", "氏名", "生年月日", "性別", "現住所(ふりがな)", "現住所",
-                  "現住所(2)", "電話", "E-mail", "学歴・職歴", "免許・資格"):
+        for k in ("記入日", "氏名(ふりがな)", "氏名", "生年月日", "性別", "現住所(ふりがな)", "現住所(〒)",
+                  "現住所", "電話", "E-mail", "学歴・職歴", "免許・資格"):
             self.assertIn(k, f)
         self.assertEqual(f["性別"].kind, "circle")
         self.assertEqual(f["学歴・職歴"].kind, "table")
@@ -51,7 +51,7 @@ class HardFixtureTests(unittest.TestCase):
         self.assertTrue(any(k.startswith("本人希望記入欄") for k in f))
         wb = self.run_fill("rirekisho", {
             "記入日": "2026-11-19", "氏名(ふりがな)": "やまだ たろう", "氏名": "山田 太郎",
-            "生年月日": "1990-04-02", "性別": "男", "現住所": "123-4567", "現住所(2)": "東京都千代田区1-1",
+            "生年月日": "1990-04-02", "性別": "男", "現住所(〒)": "123-4567", "現住所": "東京都千代田区1-1",
             "学歴・職歴": [{"年": 2009, "月": 4, "学歴・職歴": "〇〇大学 入学"}],
         })
         s = wb.sheet()
@@ -63,8 +63,8 @@ class HardFixtureTests(unittest.TestCase):
 
     def test_juminhyo(self):
         f = fmap("juminhyo")
-        self.assertEqual(f["請求者/住所"].kind, "pattern")
-        self.assertIn("住所(2)", f)
+        self.assertEqual(f["住所(〒)"].kind, "pattern")
+        self.assertEqual(f["請求者/住所"].cell, "I7")
         self.assertEqual(f["請求者/氏名"].section, "請求者")
         self.assertEqual(f["必要な方/氏名"].section, "必要な方")
         self.assertNotIn("あて先）〇〇市長", " ".join(f))
@@ -74,7 +74,7 @@ class HardFixtureTests(unittest.TestCase):
             "必要通数": 2,
         })
         s = wb.sheet()
-        self.assertEqual(s.value(11, 23), "昭60年6月15日")
+        self.assertEqual(s.value(11, 23), "昭和60年6月15日")
         self.assertEqual(s.value(15, 9), "令和2年1月10日")
         self.assertEqual(s.value(16, 9), "□本人　□同一世帯の方　■その他（祖父）")
         self.assertEqual(s.value(19, 9), "□就職　□年金　□保険　■その他（パスポート申請）")
@@ -154,8 +154,67 @@ class FormatterTests(unittest.TestCase):
     def test_era_list(self):
         self.assertEqual(format_date("1990-04-02", "昭和・平成　　年　　月　　日生（満　　歳）", True, TODAY),
                          "平成2年4月2日生（満36歳）")
-        self.assertEqual(format_date("1985-06-15", "明・大・昭・平・令　　年　　月　　日", True), "昭60年6月15日")
+        self.assertEqual(format_date("1985-06-15", "明・大・昭・平・令　　年　　月　　日", True), "昭和60年6月15日")
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DogfoodRegressionTests(unittest.TestCase):
+    """Problems found by an agent filling forms from plain-language requests."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.out = os.path.join(self.tmp, "o.xlsx")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_wareki_inputs_are_parsed(self):
+        from masume.wareki import parse_date
+        self.assertEqual(parse_date("昭和60年6月15日"), dt.date(1985, 6, 15))
+        self.assertEqual(parse_date("S60.6.15"), dt.date(1985, 6, 15))
+        self.assertEqual(parse_date("平成元年1月8日"), dt.date(1989, 1, 8))
+        self.assertEqual(parse_date("R8/11/19"), dt.date(2026, 11, 19))
+        self.assertEqual(parse_date("２０２６／１１／１９"), dt.date(2026, 11, 19))
+
+    def test_placeholders_and_nulls_never_overwrite(self):
+        from masume.cli import template_for
+        tpl = template_for(detect(load(fx("shinsei_kikan"))))
+        self.assertTrue(all(v in (None, []) for v in tpl.values()), tpl)
+        rep = fill(fx("shinsei_kikan"), self.out, dict(tpl, 申請日="YYYY-MM-DD", 所属=""))
+        self.assertTrue(rep.to_dict()["ok"])
+        self.assertEqual(rep.written, [])
+
+    def test_unparseable_date_keeps_placeholder(self):
+        rep = fill(fx("shinsei_kikan"), self.out, {"申請日": "来週"})
+        self.assertTrue(rep.errors)
+        d = rep.to_dict()
+        self.assertFalse(d["saved"])
+        self.assertIn("planned", d)
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_range_formats_and_times(self):
+        s = None
+        rep = fill(fx("shinsei_kikan"), self.out,
+                   {"出張期間": "2026-12-01/2026-12-03", "出発時刻": "09:30", "概算金額": "52000"}, today=TODAY)
+        self.assertTrue(rep.to_dict()["ok"], rep.to_dict())
+        s = load(self.out).sheet()
+        self.assertEqual(s.value(8, 8), "令和8年12月1日　～　令和8年12月3日（3日間）")
+        self.assertEqual(s.value(9, 8), "9時30分")
+        self.assertEqual(s.value(11, 8), 52000)
+        rep = fill(fx("shinsei_kikan"), self.out, {"出張期間": "2026-12-01"})
+        self.assertTrue(rep.warnings)
+
+    def test_readback_with_saved_fields(self):
+        from masume.render import sheet_to_markdown
+        fields = detect(load(fx("rirekisho")))
+        rep = fill(fx("rirekisho"), self.out, {"現住所": "東京都千代田区1-1", "性別": "女",
+                                                "学歴・職歴": [{"年": "2009", "月": "4", "学歴・職歴": "入学"}]})
+        self.assertTrue(rep.to_dict()["ok"], rep.to_dict())
+        self.assertEqual(load(self.out).sheet().value(14, 2), 2009, "numeric strings become numbers")
+        md = sheet_to_markdown(load(self.out), None, False, fields)
+        self.assertIn("| 現住所 | テキスト | F10:Y10 | [履歴書] 現在値: 東京都千代田区1-1 |", md)
+        self.assertIn("1行記入済み", md)
+        self.assertIn("現在値: 男 ・ （女）", md)

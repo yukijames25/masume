@@ -26,16 +26,20 @@ class FillReport:
     unknown_keys: list[str] = field(default_factory=list)
     unfilled: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     verified: bool | None = None  # every written value read back from the saved file
 
     def to_dict(self) -> dict:
+        saved = not self.errors and self.verified is not None
         return {
+            "ok": not self.errors and not self.unknown_keys,
+            "saved": saved,
             "verified": self.verified,
-            "written": self.written,
+            ("written" if saved else "planned"): self.written,
             "unknown_keys": self.unknown_keys,
             "unfilled": self.unfilled,
+            "warnings": self.warnings,
             "errors": self.errors,
-            "ok": not self.errors and not self.unknown_keys,
         }
 
 
@@ -55,10 +59,6 @@ def _era_text(era_tpl: str | None, d: _dt.date, wareki: bool) -> tuple[str, int 
     if era_tpl == "西暦" or (era_tpl is None and not wareki):
         return ("西暦" if era_tpl == "西暦" else ""), None
     name, y = to_wareki(d)
-    if era_tpl and re.search(r"[・･、/／]", era_tpl):
-        items = [x for x in re.split(r"[・･、/／\s　]+", era_tpl) if x]
-        if items and all(len(x) == 1 for x in items):
-            return ERA_ABBR.get(name, name), y
     return name, y
 
 
@@ -72,7 +72,7 @@ def _age(born: _dt.date, today: _dt.date) -> int:
     return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
 
 
-_RANGE_SEP = re.compile(r"\s*(?:[～〜~]|\s/\s|\s+to\s+)\s*")
+_RANGE_SEP = re.compile(r"\s*(?:[～〜~]|\s/\s|\s+to\s+|(?<=\d)/(?=\d{4}[-/.年]))\s*")
 
 
 def format_date(value, template: str | None, wareki: bool, today: _dt.date | None = None) -> str:
@@ -87,6 +87,10 @@ def format_date(value, template: str | None, wareki: bool, today: _dt.date | Non
         values = [value]
     dates = [parse_date(v) for v in values]
     if not dates or any(d is None for d in dates):
+        if template and placeholder_dates(template):
+            raise FillError(
+                f"日付として読めません: {value!r}。'2026-11-19' や '昭和60年6月15日' の形で渡してください"
+                "（そのまま書き込みたい場合はセル番地をキーにする）")
         return str(value)
     today = today or _dt.date.today()
     ms = placeholder_dates(template) if template else []
@@ -201,6 +205,8 @@ def format_pattern(template: str, value) -> str:
         end = len(body)
         slots = [s for s in slots if s[0] < end] + [(end, len(template))]
     parts = _split_value(value, len(slots))
+    if "時" in template and parts and re.fullmatch(r"0\d", str(parts[0])):
+        parts[0] = str(int(parts[0]))
     if len(parts) == len(slots):
         out, pos = [], 0
         for (a, b), p in zip(slots, parts):
@@ -212,7 +218,9 @@ def format_pattern(template: str, value) -> str:
     if slots and len(parts) == 1:
         a, b = slots[0] if len(slots) == 1 else max(slots, key=lambda s: s[1] - s[0])
         return template[:a] + str(parts[0]) + template[b:]
-    raise FillError(f"cannot fit {value!r} into {template!r} ({len(slots)} blanks); pass a list")
+    raise FillError(
+        f"「{template}」の空欄{len(slots)}か所に {value!r} を入れられません。"
+        f"区切り付きの文字列（例 '100-0001'）か、{len(slots)}要素のリストで渡してください")
 
 
 def _num(v):
@@ -329,6 +337,9 @@ def fill(
             elif f.kind == "choice_cells":
                 _fill_choice_cells(f, value, put, key, mark)
             else:
+                if (f.kind == "inline_date" and len(placeholder_dates(f.template or "")) > 1
+                        and parse_date(value) is not None):
+                    report.warnings.append(f"{key}: 期間の欄に日付が1つだけです（終了日は空欄のまま）")
                 put(f.sheet, f.cell, _format_single(f, value, wb, mark, today), key, f.id)
         except FillError as e:
             report.errors.append(f"{key}: {e}")
@@ -374,7 +385,7 @@ def _format_single(f: Field, value, wb: Workbook, mark: str, today):
         return format_inline(f.template or "", value)
     if f.kind == "pattern":
         return format_pattern(f.template or "", value)
-    return value
+    return _num(value) if isinstance(value, str) else value
 
 
 def _fill_parts(f: Field, value, put, key: str) -> None:
@@ -451,5 +462,7 @@ def _fill_table(f: Field, value, put, key: str) -> None:
         else:
             raise FillError("table rows must be objects or arrays")
         for ci, v in items:
+            if v is None or v == "":
+                continue  # leave the cell as it is
             col = f.columns[ci]["col"]
-            put(f.sheet, f"{col}{r}", v, f"{key}[{i}].{col_ids[ci]}", f.id)
+            put(f.sheet, f"{col}{r}", _num(v) if isinstance(v, str) else v, f"{key}[{i}].{col_ids[ci]}", f.id)

@@ -543,6 +543,16 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
                 if below is not None and is_label(below):
                     f.id_hint = f"{normalize_label(below.text)}(ふりがな)"
 
+    # ---- 6b. 〒 box + address row under one label: 「現住所(〒)」「現住所」 ------
+    by_label = {f.label: f for f in fields}
+    for f in fields:
+        if f.kind == "pattern" and (f.template or "").lstrip(" 　").startswith("〒"):
+            second = by_label.get(f"{f.label}(2)")
+            base = f.label
+            f.id_hint = f"{normalize_label(base)}(〒)"
+            if second is not None:
+                second.label = base
+
     # ---- 7. sections, ids ---------------------------------------------------
     headings = _headings(g, regions, used_labels, claimed)
     groups = _group_labels(g, regions, used_labels, claimed)

@@ -36,6 +36,16 @@ def template_for(fields) -> dict:
     return out
 
 
+def _load_fields(path: str):
+    from .detect import Field
+
+    with open(path, encoding="utf-8-sig") as fh:
+        raw = json.load(fh)
+    if isinstance(raw, dict):
+        raw = raw.get("fields", [])
+    return [Field.from_dict(d) for d in raw]
+
+
 def main(argv: list[str] | None = None) -> int:
     _stdout_utf8()
     ap = argparse.ArgumentParser(prog="masume", description="Excel方眼紙フォームをAIが読み書きするためのツール")
@@ -55,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("xlsx")
     p.add_argument("--sheet")
     p.add_argument("--no-layout", action="store_true")
+    p.add_argument("--fields", help="記入前に保存した inspect --json を使う（記入済みファイルの確認用）")
 
     p = sub.add_parser("fill", help="JSONの値をフォームに書き込む（書式は非破壊）")
     p.add_argument("xlsx")
@@ -99,21 +110,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"\n{len(fields)} fields", file=sys.stderr)
         elif a.cmd == "md":
             wb = ooxml.load(a.xlsx)
+            fields = _load_fields(a.fields) if a.fields else None
             if a.sheet:
-                print(sheet_to_markdown(wb, a.sheet, not a.no_layout))
+                print(sheet_to_markdown(wb, a.sheet, not a.no_layout, fields))
             else:
-                print(workbook_to_markdown(wb, not a.no_layout))
+                print(workbook_to_markdown(wb, not a.no_layout, fields))
         elif a.cmd == "fill":
             raw = sys.stdin.read() if a.data == "-" else open(a.data, encoding="utf-8-sig").read()
             data = json.loads(raw)
-            fields = None
-            if a.fields:
-                from .detect import Field
-
-                raw_f = json.load(open(a.fields, encoding="utf-8-sig"))
-                if isinstance(raw_f, dict):
-                    raw_f = raw_f.get("fields", [])
-                fields = [Field.from_dict(d) for d in raw_f]
+            fields = _load_fields(a.fields) if a.fields else None
             rep = fill(a.xlsx, a.output, data, sheet=a.sheet, mark=a.mark, strict=a.strict, fields=fields)
             print(json.dumps(rep.to_dict(), ensure_ascii=False, indent=2))
             return 0 if not rep.errors else 1
