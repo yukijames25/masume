@@ -63,6 +63,24 @@ masume inspect form.xlsx
 | 表 | `[{"日付": "11/1", "内容": "交通費", "金額": 2300}, ...]` |
 | 検出されなかった欄 | セル番地をキーに: `"C12": "..."`, `"シート名!C12": "..."` |
 
+### 記入後の確認
+
+記入した値がラベルに見えて id が変わらないよう、記入前に欄の定義を保存しておき、確認のときに渡します。
+
+```bash
+python -m masume inspect form.xlsx --json > fields.json
+python -m masume fill form.xlsx v.json -o out.xlsx
+python -m masume md out.xlsx --fields fields.json     # 各欄の「現在値」を表示
+```
+
+`template` の値はすべて `null` です。null の欄は書き込まれないので、分かる欄だけ埋めれば済みます。
+
+## ブラウザ版（インストール不要）
+
+`web/index.html` を開くだけで使えます（1ファイル・オフライン可）。ページ自体が外部への通信を禁止（CSP `default-src 'none'`）しているため、
+社外秘の様式も端末の外に出ません。検出と記入のロジックはPython版と同じで、`node web/test_core.mjs` で
+全テスト様式と300個のランダムなワークブックについて、Python版と出力が一致するかを確かめています。
+
 ## Claude Code / MCP で使う
 
 このフォルダを Claude Code で開くと `.claude/skills/masume`（スキル）と `.mcp.json`（MCPサーバー）が使えます。
