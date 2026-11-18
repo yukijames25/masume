@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import zipfile
 import json
 import sys
 
@@ -120,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
             rep = fill(a.xlsx, a.output, data, sheet=a.sheet, mark=a.mark, strict=a.strict, fields=fields)
             print(json.dumps(rep.to_dict(), ensure_ascii=False, indent=2))
             return 0 if not rep.errors else 1
-    except (OSError, KeyError, ValueError) as e:
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile, ooxml.WriteError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     return 0

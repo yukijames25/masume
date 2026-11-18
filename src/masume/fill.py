@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -271,10 +272,32 @@ def fill(
     touched: set[str] = set()
 
     def put(sheet_name: str, ref: str, value, key: str, fid: str | None):
-        r, c = parse_ref(ref)
-        cell = wb.sheet(sheet_name).cells.get((r, c))
+        try:
+            r, c = parse_ref(ref)
+        except ValueError as e:
+            report.errors.append(f"{key}: {e}")
+            return
+        sh = wb.sheet(sheet_name)
+        cell = sh.cells.get((r, c))
         if cell is not None and cell.formula is not None:
             report.errors.append(f"{key}: {sheet_name}!{ref} is a formula cell")
+            return
+        why = sh.lock_reason(r, c)
+        if why:
+            report.errors.append(f"{key}: {sheet_name}!{ref} is {why}; Excel would discard or reject it")
+            return
+        mg = sh.merge_of(r, c)
+        if mg and (mg[0], mg[1]) != (r, c):
+            report.errors.append(
+                f"{key}: {sheet_name}!{ref} is hidden inside merged cells; write to "
+                f"{ooxml.make_ref(mg[0], mg[1])} instead")
+            return
+        if isinstance(value, str):
+            value = ooxml.clean_text(value)
+        try:
+            ooxml.check_value(value)
+        except ooxml.WriteError as e:
+            report.errors.append(f"{key}: {e}")
             return
         updates.setdefault(sheet_path[sheet_name], {})[(r, c)] = value
         report.written.append({"key": key, "field": fid, "cell": f"{sheet_name}!{ref}", "value": value})
@@ -284,7 +307,13 @@ def fill(
         if f is None:
             m = _CELL_KEY.match(key)
             if m and (m.group("sheet") is None or m.group("sheet") in sheet_path):
-                put(m.group("sheet") or default_sheet, m.group("ref").replace("$", ""), value, key, None)
+                sname = m.group("sheet") or default_sheet
+                ref = m.group("ref").replace("$", "")
+                if m.group("sheet") is None and _far_outside(wb.sheet(sname), ref):
+                    # "TEL1" looks like a cell address but is almost certainly a field name
+                    report.unknown_keys.append(key)
+                    continue
+                put(sname, ref, value, key, None)
             else:
                 report.unknown_keys.append(key)
             continue
@@ -311,7 +340,20 @@ def fill(
             report.errors.append(str(e))
         else:
             report.verified = _verify(dst, report.written, report.errors)
+            if not report.verified:
+                try:
+                    os.remove(dst)  # never leave a file we could not verify
+                except OSError:
+                    pass
     return report
+
+
+def _far_outside(sheet, ref: str) -> bool:
+    try:
+        r, c = parse_ref(ref)
+    except ValueError:
+        return False  # put() reports the range error
+    return c > max(sheet.max_col, 26) + 26 or r > max(sheet.max_row, 100) + 1000
 
 
 def _format_single(f: Field, value, wb: Workbook, mark: str, today):

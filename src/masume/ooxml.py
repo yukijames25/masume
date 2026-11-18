@@ -6,8 +6,11 @@ namespace prefixes that Excel is picky about) is preserved byte-for-byte.
 """
 from __future__ import annotations
 
+import math
+import os
 import posixpath
 import re
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
@@ -23,6 +26,9 @@ _N = "{%s}" % NS
 # cell reference helpers
 # --------------------------------------------------------------------------
 _REF_RE = re.compile(r"^\$?([A-Za-z]{1,3})\$?(\d+)$")
+MAX_ROW = 1_048_576
+MAX_COL = 16_384
+MAX_TEXT = 32_767  # Excel's per-cell limit, counted in UTF-16 code units
 
 
 def col_to_idx(col: str) -> int:
@@ -45,7 +51,10 @@ def parse_ref(ref: str) -> tuple[int, int]:
     m = _REF_RE.match(ref.strip())
     if not m:
         raise ValueError(f"invalid cell reference: {ref!r}")
-    return int(m.group(2)), col_to_idx(m.group(1))
+    row, col = int(m.group(2)), col_to_idx(m.group(1))
+    if not (1 <= row <= MAX_ROW and 1 <= col <= MAX_COL):
+        raise ValueError(f"cell reference out of Excel's range: {ref!r}")
+    return row, col
 
 
 def make_ref(row: int, col: int) -> str:
@@ -86,6 +95,19 @@ class Sheet:
     cells: dict[tuple[int, int], Cell] = field(default_factory=dict)
     merges: list[tuple[int, int, int, int]] = field(default_factory=list)
     hidden: bool = False
+    locked: list = field(default_factory=list)  # [((r1, c1, r2, c2), reason)]
+
+    def lock_reason(self, row: int, col: int) -> str | None:
+        for (r1, c1, r2, c2), why in self.locked:
+            if r1 <= row <= r2 and c1 <= col <= c2:
+                return why
+        return None
+
+    def merge_of(self, row: int, col: int) -> tuple[int, int, int, int] | None:
+        for m in self.merges:
+            if m[0] <= row <= m[2] and m[1] <= col <= m[3]:
+                return m
+        return None
 
     def value(self, row: int, col: int):
         c = self.cells.get((row, col))
@@ -146,7 +168,17 @@ def _text_of_si(si: ET.Element) -> str:
             if t is not None:
                 parts.append(t.text or "")
         # _N+"rPh" (furigana) and _N+"phoneticPr" are intentionally skipped
-    return "".join(parts)
+    return decode_x("".join(parts))
+
+
+_XESC = re.compile(r"_x([0-9A-Fa-f]{4})_")
+
+
+def decode_x(text: str) -> str:
+    """Decode OOXML ``_xHHHH_`` escapes the way Excel displays them."""
+    if "_x" not in text:
+        return text
+    return _XESC.sub(lambda m: chr(int(m.group(1), 16)), text)
 
 
 def _resolve(base_dir: str, target: str) -> str:
@@ -223,16 +255,43 @@ def load(path: str) -> Workbook:
                 hidden=s.get("state", "visible") != "visible",
             )
             _read_sheet(zf.read(spath), sheet, shared)
+            _read_tables(zf, names, spath, sheet)
             sheets.append(sheet)
         return Workbook(path=path, sheets=sheets, styles=_read_styles(zf))
+
+
+def _read_tables(zf: zipfile.ZipFile, names: set, spath: str, sheet: Sheet) -> None:
+    """Header rows of Excel tables (ListObjects) must match their column names."""
+    d, fn = posixpath.split(spath)
+    rels_path = f"{d}/_rels/{fn}.rels"
+    if rels_path not in names:
+        return
+    rels = ET.fromstring(zf.read(rels_path))
+    for r in rels.findall("{%s}Relationship" % PKG_RNS):
+        if not r.get("Type", "").endswith("/table"):
+            continue
+        tpath = _resolve(d, r.get("Target", ""))
+        if tpath not in names:
+            continue
+        t = ET.fromstring(zf.read(tpath))
+        ref = t.get("ref")
+        if not ref:
+            continue
+        r1, c1, r2, c2 = parse_range(ref)
+        if t.get("headerRowCount", "1") != "0":
+            sheet.locked.append(((r1, c1, r1, c2), f"header row of Excel table {t.get('displayName', '')}"))
+        if t.get("totalsRowCount", "0") not in ("0", ""):
+            sheet.locked.append(((r2, c1, r2, c2), "totals row of an Excel table"))
 
 
 def _read_sheet(data: bytes, sheet: Sheet, shared: list[str]) -> None:
     root = ET.fromstring(data)
     sd = root.find(_N + "sheetData")
     if sd is not None:
+        prev_r = 0
         for row_el in sd.findall(_N + "row"):
-            r = int(row_el.get("r", "0"))
+            r = int(row_el.get("r", "0")) or prev_r + 1
+            prev_r = r
             next_col = 1
             for c_el in row_el.findall(_N + "c"):
                 ref = c_el.get("r")
@@ -244,6 +303,11 @@ def _read_sheet(data: bytes, sheet: Sheet, shared: list[str]) -> None:
                 t = c_el.get("t", "n")
                 v_el = c_el.find(_N + "v")
                 f_el = c_el.find(_N + "f")
+                if f_el is not None and f_el.get("t") in ("array", "dataTable") and f_el.get("ref"):
+                    try:
+                        sheet.locked.append((parse_range(f_el.get("ref")), "inside an array formula / spill range"))
+                    except ValueError:
+                        pass
                 raw = v_el.text if v_el is not None else None
                 value: object = None
                 if t == "s" and raw is not None:
@@ -254,7 +318,9 @@ def _read_sheet(data: bytes, sheet: Sheet, shared: list[str]) -> None:
                 elif t == "inlineStr":
                     is_el = c_el.find(_N + "is")
                     value = _text_of_si(is_el) if is_el is not None else None
-                elif t in ("str", "e"):
+                elif t == "str":
+                    value = decode_x(raw) if raw is not None else None
+                elif t == "e":
                     value = raw
                 elif t == "b":
                     value = raw == "1"
@@ -286,9 +352,34 @@ class WriteError(Exception):
     pass
 
 
+_ILLEGAL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff\ud800-\udfff]")
+
+
+def clean_text(value: str) -> str:
+    """Remove characters Excel cannot store (XML-illegal, U+FFFE/FFFF, lone surrogates)."""
+    return _ILLEGAL.sub("", value)
+
+
+def check_value(value) -> None:
+    if isinstance(value, bool) or value is None:
+        return
+    if isinstance(value, (int, float)):
+        try:
+            f = float(value)
+        except OverflowError:
+            raise WriteError(f"number too large for Excel: {value!r}") from None
+        if not math.isfinite(f):
+            raise WriteError(f"Excel cannot store {value!r}")
+        return
+    text = clean_text(str(value))
+    if len(text.encode("utf-16-le")) // 2 > MAX_TEXT:
+        raise WriteError(f"text longer than Excel's limit of {MAX_TEXT} characters")
+
+
 def _xml_text(value: str) -> str:
-    # strip characters that are illegal in XML 1.0
-    value = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", value)
+    value = clean_text(value)
+    # protect a literal "_xHHHH_" so Excel does not decode it
+    value = re.sub(r"_x(?=[0-9A-Fa-f]{4}_)", "_x005F_x", value)
     return escape(value)
 
 
@@ -300,7 +391,10 @@ def _cell_xml(prefix: str, ref: str, style: str | None, value) -> str:
     if isinstance(value, bool):
         return f'<{p}c r="{ref}"{s_attr} t="b"><{p}v>{int(value)}</{p}v></{p}c>'
     if isinstance(value, (int, float)):
-        return f'<{p}c r="{ref}"{s_attr}><{p}v>{value!r}</{p}v></{p}c>'
+        check_value(value)
+        num = repr(int(value)) if isinstance(value, int) else repr(float(value))
+        return f'<{p}c r="{ref}"{s_attr}><{p}v>{num}</{p}v></{p}c>'
+    check_value(value)
     text = _xml_text(str(value))
     return (
         f'<{p}c r="{ref}"{s_attr} t="inlineStr"><{p}is>'
@@ -349,8 +443,10 @@ def set_cells_xml(xml: str, updates: dict[tuple[int, int], object]) -> str:
     row_index = {}
     for rm in rows:
         ra = _ATTR_R.search(rm.group("attrs"))
-        if ra:
-            row_index[int(ra.group(1))] = rm
+        if not ra:
+            raise WriteError("sheet has rows without r= attributes; re-save it in Excel first")
+        row_index[int(ra.group(1))] = rm
+    col_styles = _col_styles(head)
 
     # process rows from bottom to top so earlier offsets stay valid
     new_body = body
@@ -359,11 +455,12 @@ def set_cells_xml(xml: str, updates: dict[tuple[int, int], object]) -> str:
         rm = row_index.get(r)
         if rm is None:
             cell_xml = "".join(
-                _cell_xml(prefix, make_ref(r, c), None, v) for c, v in sorted(cells.items())
+                _cell_xml(prefix, make_ref(r, c), col_styles.get(c), v) for c, v in sorted(cells.items())
             )
             new_row = f'<{prefix}row r="{r}">{cell_xml}</{prefix}row>'
-            # insert before first existing row with a larger index
-            pos = len(new_body)
+            # before the first existing row with a larger index, else at the ORIGINAL
+            # end of sheetData: rows are processed bottom-up, so this keeps them ascending
+            pos = len(body)
             for rr in sorted(row_index):
                 if rr > r:
                     pos = row_index[rr].start()
@@ -374,6 +471,10 @@ def set_cells_xml(xml: str, updates: dict[tuple[int, int], object]) -> str:
         attrs = rm.group("attrs")
         row_body = rm.group("body") or ""
         inserted = False
+        row_style = None
+        if re.search(r'\bcustomFormat="(1|true)"', attrs):
+            sm_row = _ATTR_S.search(attrs)
+            row_style = sm_row.group(1) if sm_row else None
         # update / insert each cell (right to left)
         for c in sorted(cells, reverse=True):
             value = cells[c]
@@ -398,7 +499,7 @@ def set_cells_xml(xml: str, updates: dict[tuple[int, int], object]) -> str:
                 new_cell = _cell_xml(prefix, ref, sm.group(1) if sm else None, value)
                 row_body = row_body[: found.start()] + new_cell + row_body[found.end():]
             else:
-                new_cell = _cell_xml(prefix, ref, None, value)
+                new_cell = _cell_xml(prefix, ref, row_style or col_styles.get(c), value)
                 pos = later.start() if later is not None else len(row_body)
                 row_body = row_body[:pos] + new_cell + row_body[pos:]
                 inserted = True
@@ -409,6 +510,50 @@ def set_cells_xml(xml: str, updates: dict[tuple[int, int], object]) -> str:
         new_body = new_body[: rm.start()] + new_row + new_body[rm.end():]
 
     return head + new_body + tail
+
+
+def _col_styles(head: str) -> dict[int, str]:
+    """Column default styles from <cols> (方眼紙 forms often set the font sheet-wide)."""
+    out: dict[int, str] = {}
+    for m in re.finditer(r"<(?:\w+:)?col\b([^>]*)/?>", head):
+        a = m.group(1)
+        st = re.search(r'\bstyle="(\d+)"', a)
+        mn = re.search(r'\bmin="(\d+)"', a)
+        mx = re.search(r'\bmax="(\d+)"', a)
+        if not (st and mn and mx) or st.group(1) == "0":
+            continue
+        lo, hi = int(mn.group(1)), min(int(mx.group(1)), MAX_COL)
+        for c in range(lo, hi + 1):
+            out[c] = st.group(1)
+    return out
+
+
+def check_sheet_xml(xml: str) -> list[str]:
+    """Structural rules Excel enforces: rows and cells ascending, inside the grid."""
+    problems = []
+    m = re.search(r"<(\w+:)?sheetData\b", xml)
+    prefix = (m.group(1) if m else "") or ""
+    prev_r = 0
+    for rm in _row_pattern(prefix).finditer(xml):
+        ra = _ATTR_R.search(rm.group("attrs"))
+        r = int(ra.group(1)) if ra else prev_r + 1
+        if not (prev_r < r <= MAX_ROW):
+            problems.append(f"row {r} out of order or range (after {prev_r})")
+        prev_r = r
+        prev_c = 0
+        for cm in _cell_pattern(prefix).finditer(rm.group("body") or ""):
+            ca = _ATTR_R.search(cm.group("attrs"))
+            if not ca:
+                continue
+            try:
+                rr, cc = parse_ref(ca.group(1))
+            except ValueError as e:
+                problems.append(str(e))
+                continue
+            if rr != r or cc <= prev_c:
+                problems.append(f"cell {ca.group(1)} out of order in row {r}")
+            prev_c = cc
+    return problems
 
 
 def _force_recalc(workbook_xml: str) -> str:
@@ -442,23 +587,48 @@ def save_with_updates(
 
     updates: { "xl/worksheets/sheet1.xml": {(row, col): value, ...}, ... }
     """
+    if os.path.exists(dst) and os.path.samefile(src, dst):
+        raise WriteError("output path must differ from the template")
     with zipfile.ZipFile(src) as zin:
         replaced: dict[str, bytes] = {}
         for spath, cells in updates.items():
             if not cells:
                 continue
             xml = zin.read(spath).decode("utf-8")
-            replaced[spath] = set_cells_xml(xml, cells).encode("utf-8")
+            new_xml = set_cells_xml(xml, cells)
+            problems = check_sheet_xml(new_xml)
+            if problems:
+                raise WriteError("refusing to write a sheet Excel would reject: " + "; ".join(problems[:3]))
+            replaced[spath] = new_xml.encode("utf-8")
         if recalc and replaced and "xl/workbook.xml" in zin.namelist():
             replaced["xl/workbook.xml"] = _force_recalc(
                 zin.read("xl/workbook.xml").decode("utf-8")
             ).encode("utf-8")
-        with zipfile.ZipFile(dst, "w") as zout:
-            for info in zin.infolist():
-                data = replaced.get(info.filename)
-                if data is None:
-                    data = zin.read(info.filename)
-                zi = zipfile.ZipInfo(info.filename, date_time=info.date_time)
-                zi.compress_type = info.compress_type
-                zi.external_attr = info.external_attr
-                zout.writestr(zi, data)
+        out_dir = os.path.dirname(os.path.abspath(dst)) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".masume-", suffix=".xlsx", dir=out_dir)
+        os.close(fd)
+        try:
+            seen: set[str] = set()
+            with zipfile.ZipFile(tmp, "w") as zout:
+                for info in zin.infolist():
+                    if info.filename in seen:
+                        continue  # duplicate entries confuse Excel
+                    seen.add(info.filename)
+                    data = replaced.get(info.filename)
+                    if data is None:
+                        try:
+                            data = zin.read(info.filename)
+                        except NotImplementedError as e:
+                            raise WriteError(f"unsupported zip compression in template: {e}") from None
+                    zi = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+                    zi.compress_type = (info.compress_type if info.compress_type in
+                                        (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED) else zipfile.ZIP_DEFLATED)
+                    zi.external_attr = info.external_attr
+                    zout.writestr(zi, data)
+            os.replace(tmp, dst)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
