@@ -532,6 +532,21 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
                 used_labels.add(lab)
                 fields.append(_make_box_field(sheet, lab.text, "text", [nxt], None, [None]))
 
+    # ---- 3c. one-character boxes in the row under a label: 「指定番号」 -------
+    for lab in [r for r in regions if free_label(r)]:
+        row = lab.r2 + 1
+        edge = Region(row, lab.c1 - 1, row, lab.c1 - 1, None, False, False)
+        res = _scan_right(g, edge, row, claimed, used_labels)
+        if res is None or res[0] != "digits" or res[1][0].c1 > lab.c1 + 1:
+            continue
+        kind, boxes, prefix, suffixes = res
+        heads = [g.at(row - 1, b.c1) for b in boxes]
+        if any(h is not None and h != lab and not h.empty for h in heads):
+            continue  # each box has its own header (決裁: 部長 | 課長 | 担当): not one number
+        fields.append(_make_box_field(sheet, lab.text, kind, boxes, prefix, suffixes))
+        claimed.update(boxes)
+        used_labels.add(lab)
+
     # ---- 3b. [box] 御中 / 様 / 殿 ------------------------------------------
     for reg in regions:
         if reg.empty or not isinstance(reg.value, str) or reg.text not in HONORIFICS:

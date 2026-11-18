@@ -1859,6 +1859,20 @@ function detectSheet(sheet, styles) {
     }
   }
 
+  // ---- 3c. one-character boxes in the row under a label: 「指定番号」
+  for (const lab of regions.filter(freeLabel)) {
+    const row = lab.r2 + 1;
+    const edge = new Region(row, lab.c1 - 1, row, lab.c1 - 1, null, false, false);
+    const res = scanRight(g, edge, row, claimed, usedLabels);
+    if (res === null || res[0] !== 'digits' || res[1][0].c1 > lab.c1 + 1) continue;
+    const [kind, boxes, prefix, suffixes] = res;
+    const heads = boxes.map((b) => g.at(row - 1, b.c1));
+    if (heads.some((h) => h !== null && h.key !== lab.key && !h.empty)) continue; // 決裁: 部長 | 課長 | 担当
+    fields.push(makeBoxField(sheet, lab.text, kind, boxes, prefix, suffixes));
+    claimed.addAll(boxes);
+    usedLabels.add(lab);
+  }
+
   // ---- 3b. [box] 御中 / 様 / 殿
   for (const reg of regions) {
     if (reg.empty || !isStr(reg.value) || !HONORIFICS.has(reg.text)) continue;

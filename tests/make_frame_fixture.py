@@ -41,6 +41,10 @@ def build(path):
     for c in range(2, 7):
         side(ws, 4, c, top=T); side(ws, 8, c, bottom=T)
     side(ws, 5, 2, left=T); side(ws, 5, 6, right=T)
+    # 「指定番号」 with its one-character boxes in the row under it
+    ws.merge_cells("Y2:AB2"); ws["Y2"] = "指定番号"
+    for c in range(25, 31):
+        side(ws, 3, c, left=T, right=T, top=T, bottom=T)
     # printed addressee and a date split over cells
     ws["B10"] = "〇〇市長"
     for rng in ("B15:C15", "D15:E15", "G15:H15", "J15:K15", "M15:O15"):
