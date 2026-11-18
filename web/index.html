@@ -1,0 +1,3230 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>masume 升目 — Excel方眼紙フォーム記入</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f5f4ef;
+  --surface: #ffffff;
+  --surface-2: #f0efe8;
+  --text: #1e2226;
+  --muted: #5c636d;
+  --faint: #8b919a;
+  --border: #e1ded5;
+  --border-strong: #c8c4b8;
+  --accent: #2f5d8a;
+  --accent-hover: #264d74;
+  --accent-ink: #ffffff;
+  --accent-soft: #e8eef5;
+  --ok: #2c7a56;
+  --ok-soft: #e6f3ec;
+  --warn: #8d6200;
+  --warn-soft: #faf2dc;
+  --err: #b0271f;
+  --err-soft: #fbeae8;
+  --grid: rgba(47, 93, 138, 0.075);
+  --focus: rgba(47, 93, 138, 0.35);
+  --shadow: 0 1px 2px rgba(20, 20, 10, 0.04), 0 6px 20px rgba(20, 20, 10, 0.04);
+  --radius: 12px;
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Menlo", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --surface: #1d2024;
+    --surface-2: #24282d;
+    --text: #e7e6e2;
+    --muted: #a3a9b1;
+    --faint: #7c838c;
+    --border: #30353b;
+    --border-strong: #454b53;
+    --accent: #8db1e3;
+    --accent-hover: #a7c3ea;
+    --accent-ink: #10213a;
+    --accent-soft: #22324a;
+    --ok: #79c9a0;
+    --ok-soft: #1c3329;
+    --warn: #e2bd63;
+    --warn-soft: #362d17;
+    --err: #f2938b;
+    --err-soft: #3a2120;
+    --grid: rgba(141, 177, 227, 0.07);
+    --focus: rgba(141, 177, 227, 0.4);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.2);
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", "Yu Gothic", Meiryo, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 880px; margin: 0 auto; padding: 0 16px; }
+header.top { padding: 28px 0 8px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.logo { width: 44px; height: 44px; flex: none; color: var(--accent); }
+.brand h1 { margin: 0; font-size: 22px; line-height: 1.2; letter-spacing: 0.01em; }
+.brand h1 span { font-weight: 500; color: var(--muted); font-size: 15px; margin-left: 6px; }
+.brand p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+
+.privacy {
+  display: flex; gap: 12px; align-items: flex-start;
+  margin: 18px 0 20px; padding: 14px 16px;
+  background: var(--ok-soft); color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+.privacy svg { width: 22px; height: 22px; flex: none; color: var(--ok); margin-top: 1px; }
+.privacy strong { color: var(--ok); }
+
+.drop {
+  position: relative;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 18px 18px;
+  padding: 40px 20px;
+  text-align: center;
+  transition: border-color .15s, background-color .15s;
+}
+.drop.over { border-color: var(--accent); background-color: var(--accent-soft); }
+.drop h2 { margin: 0 0 6px; font-size: 18px; }
+.drop p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+.drop .err { margin: 16px auto 0; max-width: 560px; }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0 8px; padding: 0; list-style: none; counter-reset: s; }
+.steps li { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 13px; color: var(--muted); counter-increment: s; }
+.steps li::before { content: counter(s); display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 6px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12px; }
+.steps b { color: var(--text); font-weight: 600; }
+
+button, .btn {
+  font: inherit; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 38px; padding: 7px 14px;
+  border-radius: 9px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text);
+  cursor: pointer; white-space: nowrap;
+  transition: background-color .12s, border-color .12s;
+}
+button:hover, .btn:hover { background: var(--surface-2); }
+button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button.primary:hover, .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.link { border: none; background: none; color: var(--accent); padding: 2px 4px; min-height: 0; font-size: 13px; }
+button.link:hover { text-decoration: underline; background: none; }
+button:disabled { opacity: .55; cursor: default; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+.filebar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 14px; box-shadow: var(--shadow);
+}
+.filebar .fname { font-weight: 600; word-break: break-all; }
+.filebar .fmeta { color: var(--muted); font-size: 13px; }
+.filebar .spacer { flex: 1; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
+.tabs button {
+  border: none; border-radius: 0; background: none; min-height: 42px;
+  padding: 8px 14px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tabs button:hover { background: none; color: var(--text); }
+.tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.badge { display: inline-block; font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 99px; background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 6px 18px 10px; margin-bottom: 14px; box-shadow: var(--shadow);
+}
+.card-title { margin: 10px 0 2px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
+.sheet-title { font-size: 16px; margin: 22px 0 10px; display: flex; align-items: center; gap: 8px; }
+.sheet-title::before { content: ""; width: 4px; height: 16px; border-radius: 2px; background: var(--accent); }
+
+.field { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 4px 18px; padding: 12px 0; border-top: 1px solid var(--border); }
+.card-title + .field, .card > .field:first-child { border-top: none; }
+.f-head { display: flex; flex-direction: column; gap: 2px; padding-top: 7px; min-width: 0; }
+.f-label { font-weight: 600; font-size: 14px; word-break: break-word; }
+.f-meta { font-size: 12px; color: var(--faint); font-family: var(--mono); word-break: break-all; }
+.f-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.f-preview { grid-column: 2; font-size: 13px; color: var(--muted); min-height: 0; word-break: break-word; }
+.f-preview:empty { display: none; }
+.f-preview.error { color: var(--err); }
+.f-preview .val { color: var(--text); background: var(--surface-2); border-radius: 5px; padding: 1px 6px; }
+.f-hint { font-size: 12.5px; color: var(--faint); }
+.f-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+input[type="text"], input[type="date"], textarea, select {
+  font: inherit; font-size: 15px; color: var(--text);
+  width: 100%; min-height: 40px; padding: 7px 10px;
+  background: var(--bg); border: 1px solid var(--border-strong); border-radius: 8px;
+}
+input[type="date"] { width: auto; min-width: 180px; }
+textarea { resize: vertical; min-height: 84px; line-height: 1.55; }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
+input::placeholder, textarea::placeholder { color: var(--faint); }
+select { width: auto; min-height: 36px; padding: 4px 8px; }
+
+.opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.opt { position: relative; }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt span {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 12px;
+  border: 1px solid var(--border-strong); border-radius: 99px; background: var(--bg); cursor: pointer; font-size: 14px;
+}
+.opt span::before { content: "□"; color: var(--faint); }
+.opt input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.opt input:checked + span::before { content: "■"; color: var(--accent); }
+.opt input:focus-visible + span { box-shadow: 0 0 0 3px var(--focus); }
+input.digits { font-family: var(--mono); letter-spacing: .35em; max-width: 22em; }
+.f-row.parts input.part { width: 6.5em; flex: 0 1 6.5em; }
+.f-row .suffix { color: var(--muted); font-size: 14px; }
+.opts + input[type="text"], .f-body > input[type="text"][aria-label] { max-width: 28em; }
+.opt-tools { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
+.opt-tools label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; }
+table.grid { border-collapse: collapse; width: 100%; min-width: 420px; font-size: 14px; }
+table.grid th, table.grid td { border-bottom: 1px solid var(--border); padding: 0; }
+table.grid th { background: var(--surface-2); font-weight: 600; font-size: 13px; text-align: left; padding: 6px 8px; white-space: nowrap; }
+table.grid td + td, table.grid th + th { border-left: 1px solid var(--border); }
+table.grid tr:last-child td { border-bottom: none; }
+table.grid td.rn { width: 34px; text-align: center; color: var(--faint); font-size: 12px; background: var(--surface-2); }
+table.grid input { border: none; border-radius: 0; background: transparent; min-height: 36px; font-size: 14px; padding: 6px 8px; }
+table.grid input:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+
+.panel-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
+.panel-tools .spacer { flex: 1; }
+.help { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+.help code, .mono { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+textarea.code, pre.code {
+  font-family: var(--mono); font-size: 13px; line-height: 1.55;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px; width: 100%; margin: 0;
+}
+textarea.code { min-height: 420px; }
+pre.code { white-space: pre-wrap; word-break: break-word; max-height: 70vh; overflow: auto; }
+.note { font-size: 13px; padding: 10px 12px; border-radius: 9px; background: var(--warn-soft); color: var(--text); margin: 10px 0; }
+.note b { color: var(--warn); }
+
+.msg { font-size: 13.5px; padding: 10px 12px; border-radius: 9px; margin: 10px 0; }
+.msg.ok { background: var(--ok-soft); }
+.msg.warn { background: var(--warn-soft); }
+.msg.err, .err { background: var(--err-soft); color: var(--text); border-radius: 9px; padding: 10px 12px; font-size: 14px; text-align: left; }
+.msg ul { margin: 6px 0 0; padding-left: 20px; }
+.msg details { margin-top: 6px; }
+.msg summary { cursor: pointer; color: var(--muted); }
+
+.empty { text-align: center; color: var(--muted); padding: 30px 16px; }
+.extras { font-size: 13px; color: var(--muted); }
+.extras ul { margin: 4px 0 0; padding-left: 18px; font-family: var(--mono); font-size: 12.5px; }
+
+.actionbar {
+  position: sticky; bottom: 0; z-index: 5;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border);
+  margin-top: 18px;
+}
+.actionbar .wrap { display: flex; align-items: center; gap: 10px 14px; padding-top: 12px; padding-bottom: 12px; flex-wrap: wrap; }
+.actionbar .status { font-size: 13px; color: var(--muted); flex: 1; min-width: 160px; }
+.actionbar label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.actionbar .primary { min-height: 44px; padding: 8px 18px; font-size: 15px; }
+
+footer { color: var(--faint); font-size: 12.5px; padding: 28px 0 36px; }
+footer p { margin: 4px 0; }
+[hidden] { display: none !important; }
+
+@media (max-width: 640px) {
+  body { font-size: 15px; }
+  header.top { padding-top: 20px; }
+  .steps { grid-template-columns: 1fr; }
+  .field { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .f-head { padding-top: 0; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+  .f-preview { grid-column: 1; }
+  .card { padding: 4px 14px 8px; }
+  .drop { padding: 30px 14px; }
+  input[type="date"] { width: 100%; }
+  .actionbar .primary { flex: 1 1 100%; }
+  .actionbar .status { flex-basis: 100%; }
+}
+</style>
+</head>
+<body>
+<header class="top wrap">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 44 44" aria-hidden="true">
+      <rect x="3" y="3" width="38" height="38" rx="8" fill="none" stroke="currentColor" stroke-width="2.4"/>
+      <path d="M3 16.5h38M3 29.5h38M16.5 3v38M29.5 3v38" stroke="currentColor" stroke-width="1.3" opacity=".45"/>
+      <rect x="16.5" y="16.5" width="13" height="13" fill="currentColor" opacity=".9"/>
+    </svg>
+    <div>
+      <h1>masume<span>升目</span></h1>
+      <p>Excel方眼紙の申請書・届出書を、ブラウザだけで記入</p>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="privacy" role="note">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+    <div><strong>ファイルはどこにも送信されません。</strong>
+      読み込み・解析・書き出しは、すべてこの端末のブラウザ内で行います。このページ自体が外部への通信を禁止（Content-Security-Policy）しているため、社外秘の書類もそのまま扱えます。保存してオフラインで開いても動きます。</div>
+  </section>
+
+  <section id="start">
+    <div id="drop" class="drop">
+      <h2>Excelファイルをここにドロップ</h2>
+      <p>.xlsx / .xlsm（Excel方眼紙の申請書・届出書など）</p>
+      <label class="btn primary" for="file">ファイルを選択</label>
+      <button type="button" class="btn" id="sample">サンプル（休暇届）で試す</button>
+      <input id="file" type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" hidden>
+      <div id="load-error" class="err" role="alert" hidden></div>
+    </div>
+    <ol class="steps">
+      <li><b>読み込む</b> — 入力欄を自動で見つけます</li>
+      <li><b>記入する</b> — フォームに入力、またはAIにJSONを作らせて貼り付け</li>
+      <li><b>ダウンロード</b> — 書式・罫線・画像はそのまま、値だけ記入</li>
+    </ol>
+  </section>
+
+  <section id="app" hidden>
+    <div class="filebar">
+      <div>
+        <div class="fname" id="fname"></div>
+        <div class="fmeta" id="fmeta"></div>
+      </div>
+      <div class="spacer"></div>
+      <button type="button" id="reset">別のファイルを開く</button>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="表示切替">
+      <button type="button" role="tab" id="tab-form" aria-controls="panel-form" aria-selected="true">入力フォーム</button>
+      <button type="button" role="tab" id="tab-json" aria-controls="panel-json" aria-selected="false">JSON <span class="badge" id="json-dirty" hidden>未反映</span></button>
+      <button type="button" role="tab" id="tab-md" aria-controls="panel-md" aria-selected="false">AI用Markdown</button>
+    </div>
+
+    <div id="panel-form" role="tabpanel" aria-labelledby="tab-form">
+      <p class="help">空欄のままの項目は書き換えません。数字だけの入力（例: <span class="mono">2300</span>、<span class="mono">2,300</span>）は数値として書き込むので、合計などの数式に反映されます。先頭が0の番号（例: <span class="mono">0123</span>）は文字のままです。</p>
+      <div id="form-fields"></div>
+      <div id="form-extras" class="card extras" hidden></div>
+    </div>
+
+    <div id="panel-json" role="tabpanel" aria-labelledby="tab-json" hidden>
+      <p class="help">キーは入力欄のid（ラベルやセル番地 <span class="mono">B3</span> / <span class="mono">Sheet1!B3</span> も可）。Python版CLI <span class="mono">masume fill</span> と同じ形式です。AIの回答をそのまま貼り付けてもかまいません（```json の囲みは自動で外します）。</p>
+      <div class="panel-tools">
+        <button type="button" class="primary" id="json-apply">フォームに反映</button>
+        <button type="button" id="json-copy">コピー</button>
+        <button type="button" id="json-template">雛形を挿入</button>
+        <div class="spacer"></div>
+        <button type="button" class="link" id="json-reload">フォームの内容に戻す</button>
+      </div>
+      <div id="json-msg" role="status"></div>
+      <textarea id="json" class="code" spellcheck="false" autocomplete="off" aria-label="記入値のJSON"></textarea>
+    </div>
+
+    <div id="panel-md" role="tabpanel" aria-labelledby="tab-md" hidden>
+      <p class="help">シートの構造と入力欄の一覧です。ChatGPTやClaudeに貼り付けて「このフォームに記入するJSONを作って」と頼み、返ってきたJSONを「JSON」タブに貼り付けてください。</p>
+      <div class="note"><b>注意：</b>AIサービスに貼り付けた内容は、そのサービスに送信されます。社外秘の情報を含む場合は、社内のルールに従ってください（このページ自体は何も送信しません）。</div>
+      <div class="panel-tools">
+        <button type="button" class="primary" id="md-copy-prompt">AIへの依頼文ごとコピー</button>
+        <button type="button" id="md-copy">Markdownだけコピー</button>
+      </div>
+      <pre id="md" class="code"></pre>
+    </div>
+
+    <div id="report" role="status" aria-live="polite"></div>
+  </section>
+</main>
+
+<div class="actionbar" id="actionbar" hidden>
+  <div class="wrap">
+    <div class="status" id="status"></div>
+    <label>チェック記号
+      <select id="mark" aria-label="チェック記号">
+        <option value="■">■</option>
+        <option value="☑">☑</option>
+        <option value="✔">✔</option>
+      </select>
+    </label>
+    <button type="button" class="primary" id="download">記入済みExcelをダウンロード</button>
+  </div>
+</div>
+
+<footer class="wrap">
+  <p>masume（升目）— 結合セルと罫線から入力欄を見つけ、値だけをシートXMLに書き込みます。変更したセル以外（書式・画像・印影・印刷設定）はバイト単位でそのまま残ります。</p>
+  <p>このHTMLファイル1つで動作します。保存しておけばオフラインでも使えます。</p>
+</footer>
+
+<script id="core">
+/* masume core: pure logic (no DOM). Port of src/masume/{ooxml,detect,fill,wareki,render}.py.
+ * Runs in browsers and in Node (see web/test_core.mjs). */
+(function (root) {
+'use strict';
+
+const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const RNS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const PKG_RNS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+const XML_NS = 'http://www.w3.org/XML/1998/namespace';
+const N = '{' + NS + '}';
+
+/* ======================================================================
+ * Python compatibility helpers
+ * ==================================================================== */
+// characters for which Python's str.isspace() is true (== re's \s for str patterns)
+const WS = '\\t\\n\\x0B\\x0C\\r\\x1C-\\x1F \\x85\\xA0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000';
+const RE_LSTRIP = new RegExp('^[' + WS + ']+', 'u');
+const RE_RSTRIP = new RegExp('[' + WS + ']+$', 'u');
+const RE_ND1 = /^\p{Nd}$/u;
+
+class ValueError extends Error {}
+class KeyError extends Error {}
+class FillError extends Error {}
+class WriteError extends Error {}
+class FormatError extends Error {
+  constructor(code, message) { super(message); this.code = code; }
+}
+
+/** float whose value is integral (Python prints it as "3.0"); other floats are plain numbers */
+class PyFloat { constructor(v) { this.v = v; } valueOf() { return this.v; } toJSON() { return this.v; } }
+
+function cpLen(s) { let n = 0; for (const _ of s) n++; return n; }
+function firstCp(s) { for (const ch of s) return ch; return ''; }
+function lastCp(s) { const a = Array.from(s); return a.length ? a[a.length - 1] : ''; }
+function stripWS(s) { return s.replace(RE_LSTRIP, '').replace(RE_RSTRIP, ''); }
+function rstripWS(s) { return s.replace(RE_RSTRIP, ''); }
+/** str.strip([chars]) */
+function pyStrip(s, chars) {
+  if (chars == null) return stripWS(s);
+  const a = Array.from(s);
+  let i = 0, j = a.length;
+  while (i < j && chars.includes(a[i])) i++;
+  while (j > i && chars.includes(a[j - 1])) j--;
+  return a.slice(i, j).join('');
+}
+function pyLstrip(s, chars) {
+  const a = Array.from(s);
+  let i = 0;
+  while (i < a.length && chars.includes(a[i])) i++;
+  return a.slice(i).join('');
+}
+function countSub(s, sub) { return sub ? s.split(sub).length - 1 : 0; }
+function escapeRe(s) { return s.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&'); }
+
+// numeric value of a Unicode decimal digit (\p{Nd} blocks are runs of 0-9)
+function digitValue(ch) {
+  const cp = ch.codePointAt(0);
+  if (cp >= 0x30 && cp <= 0x39) return cp - 0x30;
+  let n = 0;
+  while (n < 100 && cp - n - 1 >= 0 && RE_ND1.test(String.fromCodePoint(cp - n - 1))) n++;
+  return n % 10;
+}
+function asciiDigits(s) { return s.replace(/\p{Nd}/gu, (d) => String(digitValue(d))); }
+
+/** int(str) */
+function pyInt(s) {
+  const t = stripWS(String(s));
+  if (!/^[+-]?\p{Nd}+(?:_\p{Nd}+)*$/u.test(t)) throw new ValueError(`invalid literal for int(): '${s}'`);
+  return Number(asciiDigits(t).replace(/_/g, ''));
+}
+const PY_D = '\\p{Nd}(?:_?\\p{Nd})*';
+const RE_PYFLOAT = new RegExp(
+  `^[+-]?(?:(?:${PY_D}\\.(?:${PY_D})?|\\.${PY_D}|${PY_D})(?:[eE][+-]?${PY_D})?|inf|infinity|nan)$`, 'iu');
+/** float(str); throws ValueError */
+function pyFloat(s) {
+  const t = stripWS(String(s));
+  if (!RE_PYFLOAT.test(t)) throw new ValueError(`could not convert string to float: '${s}'`);
+  const low = t.toLowerCase();
+  if (low.endsWith('inf') || low.endsWith('infinity')) return low.startsWith('-') ? -Infinity : Infinity;
+  if (low.endsWith('nan')) return NaN;
+  return Number(asciiDigits(t).replace(/_/g, ''));
+}
+function pyIntStr(n) { return Number.isSafeInteger(n) ? String(n) : BigInt(n).toString(); }
+/** repr(float) */
+function pyFloatRepr(x) {
+  if (Number.isNaN(x)) return 'nan';
+  if (x === Infinity) return 'inf';
+  if (x === -Infinity) return '-inf';
+  if (x === 0) return Object.is(x, -0) ? '-0.0' : '0.0';
+  let [mant, exp] = x.toExponential().split('e');
+  const ex = parseInt(exp, 10);
+  const neg = mant.startsWith('-');
+  if (neg) mant = mant.slice(1);
+  const digits = mant.replace('.', '');
+  let s;
+  if (ex >= -4 && ex < 16) {
+    if (ex >= 0) {
+      s = digits.length <= ex + 1
+        ? digits + '0'.repeat(ex + 1 - digits.length) + '.0'
+        : digits.slice(0, ex + 1) + '.' + digits.slice(ex + 1);
+    } else {
+      s = '0.' + '0'.repeat(-ex - 1) + digits;
+    }
+  } else {
+    s = digits[0] + (digits.length > 1 ? '.' + digits.slice(1) : '') + 'e' + (ex < 0 ? '-' : '+') +
+      String(Math.abs(ex)).padStart(2, '0');
+  }
+  return (neg ? '-' : '') + s;
+}
+const RE_NONPRINTABLE = /^[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]$/u;
+/** repr() for the JSON-ish values we handle */
+function pyRepr(v) {
+  if (typeof v === 'string') {
+    const q = v.includes("'") && !v.includes('"') ? '"' : "'";
+    let out = '';
+    for (const ch of v) {
+      if (ch === '\\') out += '\\\\';
+      else if (ch === q) out += '\\' + q;
+      else if (ch === '\n') out += '\\n';
+      else if (ch === '\r') out += '\\r';
+      else if (ch === '\t') out += '\\t';
+      else if (ch !== ' ' && RE_NONPRINTABLE.test(ch)) { // str.isprintable() is false -> escaped
+        const cp = ch.codePointAt(0);
+        out += cp < 0x100 ? '\\x' + cp.toString(16).padStart(2, '0')
+          : cp < 0x10000 ? '\\u' + cp.toString(16).padStart(4, '0') : '\\U' + cp.toString(16).padStart(8, '0');
+      } else out += ch;
+    }
+    return q + out + q;
+  }
+  return pyStr(v);
+}
+/** str() */
+function pyStr(v) {
+  if (v === null || v === undefined) return 'None';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'boolean') return v ? 'True' : 'False';
+  if (v instanceof PyFloat) return pyFloatRepr(v.v);
+  if (typeof v === 'number') return Number.isInteger(v) ? pyIntStr(v) : pyFloatRepr(v);
+  if (Array.isArray(v)) return '[' + v.map(pyRepr).join(', ') + ']';
+  if (typeof v === 'object') return '{' + Object.entries(v).map(([k, x]) => pyRepr(k) + ': ' + pyRepr(x)).join(', ') + '}';
+  return String(v);
+}
+function isPyNum(v) { return typeof v === 'number' || typeof v === 'boolean' || v instanceof PyFloat; }
+/** a == b for values read from / written to cells */
+function pyEq(a, b) {
+  if (a == null || b == null) return a == null && b == null;
+  if (isPyNum(a) && isPyNum(b)) return Number(a) === Number(b);
+  if (typeof a === 'string' && typeof b === 'string') return a === b;
+  return false;
+}
+function valueKey(v) {
+  if (v == null) return 'z';
+  if (isPyNum(v)) return 'n' + Number(v);
+  return 's' + pyStr(v);
+}
+
+/* ======================================================================
+ * cell references
+ * ==================================================================== */
+const RE_REF = /^\$?([A-Za-z]{1,3})\$?(\p{Nd}+)$/u;
+const KEY = (r, c) => r * 32768 + c;
+const MAX_ROW = 1048576;
+const MAX_COL = 16384;
+const MAX_TEXT = 32767; // Excel's per-cell limit, in UTF-16 code units
+function colToIdx(col) {
+  let n = 0;
+  for (const ch of col.toUpperCase()) n = n * 26 + (ch.codePointAt(0) - 64);
+  return n;
+}
+function idxToCol(idx) {
+  let s = '';
+  while (idx > 0) {
+    const rem = (idx - 1) % 26;
+    idx = Math.floor((idx - 1) / 26);
+    s = String.fromCharCode(65 + rem) + s;
+  }
+  return s;
+}
+function parseRef(ref) {
+  const m = RE_REF.exec(stripWS(ref));
+  if (!m) throw new ValueError(`invalid cell reference: ${pyRepr(ref)}`);
+  const row = pyInt(m[2]), col = colToIdx(m[1]);
+  if (!(row >= 1 && row <= MAX_ROW && col >= 1 && col <= MAX_COL)) throw new ValueError(`cell reference out of Excel's range: ${pyRepr(ref)}`);
+  return [row, col];
+}
+function makeRef(row, col) { return idxToCol(col) + row; }
+function parseRange(rng) {
+  let a, b;
+  const k = rng.indexOf(':');
+  if (k >= 0) { a = rng.slice(0, k); b = rng.slice(k + 1); } else { a = b = rng; }
+  const [r1, c1] = parseRef(a);
+  const [r2, c2] = parseRef(b);
+  return [Math.min(r1, r2), Math.min(c1, c2), Math.max(r1, r2), Math.max(c1, c2)];
+}
+
+/* ======================================================================
+ * minimal namespace-aware XML parser (ElementTree-like: tag, attrs, children, text)
+ * ==================================================================== */
+const ENT = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+function decodeEntities(s) {
+  if (s.indexOf('&') < 0) return s;
+  return s.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|lt|gt|amp|quot|apos);/g, (m, g) => {
+    if (g[0] === '#') {
+      const cp = g[1] === 'x' || g[1] === 'X' ? parseInt(g.slice(2), 16) : parseInt(g.slice(1), 10);
+      try { return String.fromCodePoint(cp); } catch (e) { return m; }
+    }
+    return ENT[g];
+  });
+}
+const COMMENT_OPEN = '<' + '!--';
+function parseXML(input) {
+  let s = input;
+  if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
+  s = s.replace(/\r\n?/g, '\n');
+  const len = s.length;
+  const stack = [];
+  const nsStack = [{ xml: XML_NS }];
+  let rootEl = null;
+  const lookup = (prefix) => {
+    for (let k = nsStack.length - 1; k >= 0; k--) if (Object.prototype.hasOwnProperty.call(nsStack[k], prefix)) return nsStack[k][prefix];
+    return undefined;
+  };
+  const resolveName = (qn, isAttr) => {
+    const k = qn.indexOf(':');
+    if (k < 0) {
+      if (isAttr) return qn;
+      const d = lookup('');
+      return d ? '{' + d + '}' + qn : qn;
+    }
+    const uri = lookup(qn.slice(0, k));
+    return uri !== undefined && uri !== '' ? '{' + uri + '}' + qn.slice(k + 1) : qn;
+  };
+  const addText = (t) => {
+    if (!stack.length) return;
+    const cur = stack[stack.length - 1];
+    if (cur.children.length === 0) cur.text = (cur.text || '') + t;
+  };
+  let i = 0;
+  while (i < len) {
+    const lt = s.indexOf('<', i);
+    const end = lt < 0 ? len : lt;
+    if (end > i) addText(decodeEntities(s.slice(i, end)));
+    if (lt < 0) break;
+    const c1 = s[lt + 1];
+    if (c1 === '!') {
+      if (s.startsWith(COMMENT_OPEN, lt)) {
+        const e = s.indexOf('--' + '>', lt + 4);
+        i = e < 0 ? len : e + 3;
+        continue;
+      }
+      if (s.startsWith('<![CDATA[', lt)) {
+        const e = s.indexOf(']]>', lt + 9);
+        addText(s.slice(lt + 9, e < 0 ? len : e));
+        i = e < 0 ? len : e + 3;
+        continue;
+      }
+      let j = lt + 2, depth = 0;
+      while (j < len) {
+        const ch = s[j];
+        if (ch === '[') depth++;
+        else if (ch === ']') depth--;
+        else if (ch === '>' && depth <= 0) break;
+        j++;
+      }
+      i = j + 1;
+      continue;
+    }
+    if (c1 === '?') {
+      const e = s.indexOf('?>', lt + 2);
+      i = e < 0 ? len : e + 2;
+      continue;
+    }
+    if (c1 === '/') {
+      const e = s.indexOf('>', lt + 2);
+      if (stack.length) { stack.pop(); nsStack.pop(); }
+      i = e < 0 ? len : e + 1;
+      continue;
+    }
+    let j = lt + 1, q = null;
+    while (j < len) {
+      const ch = s[j];
+      if (q) { if (ch === q) q = null; } else if (ch === '"' || ch === "'") q = ch; else if (ch === '>') break;
+      j++;
+    }
+    let body = s.slice(lt + 1, j);
+    let selfClose = false;
+    if (body.endsWith('/')) { selfClose = true; body = body.slice(0, -1); }
+    const qm = /^[^\s/>]+/.exec(body);
+    if (!qm) throw new FormatError('xml', 'XMLの形式が正しくありません');
+    const qname = qm[0];
+    const nsMap = {};
+    const rawAttrs = [];
+    const attrRe = /([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+    attrRe.lastIndex = qname.length;
+    let am;
+    while ((am = attrRe.exec(body))) {
+      const name = am[1];
+      const val = decodeEntities((am[2] !== undefined ? am[2] : am[3]).replace(/[\t\n]/g, ' '));
+      if (name === 'xmlns') nsMap[''] = val;
+      else if (name.startsWith('xmlns:')) nsMap[name.slice(6)] = val;
+      else rawAttrs.push([name, val]);
+    }
+    nsStack.push(nsMap);
+    const el = { tag: resolveName(qname, false), attrs: {}, children: [], text: null };
+    for (const [n, v] of rawAttrs) el.attrs[resolveName(n, true)] = v;
+    if (stack.length) stack[stack.length - 1].children.push(el);
+    else if (!rootEl) rootEl = el;
+    if (selfClose) nsStack.pop(); else stack.push(el);
+    i = j + 1;
+  }
+  if (!rootEl) throw new FormatError('xml', 'XMLを解析できません');
+  return rootEl;
+}
+function xfind(el, tag) { if (!el) return null; for (const c of el.children) if (c.tag === tag) return c; return null; }
+function xfindall(el, tag) { return el ? el.children.filter((c) => c.tag === tag) : []; }
+function xget(el, name, dflt) { return Object.prototype.hasOwnProperty.call(el.attrs, name) ? el.attrs[name] : dflt; }
+
+/* ======================================================================
+ * ZIP (read: stored/deflate, zip64 directory; write: stored/deflate)
+ * ==================================================================== */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+async function pipeBytes(u8, transform) {
+  const stream = new Blob([u8]).stream().pipeThrough(transform);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+const inflateRaw = (u8) => pipeBytes(u8, new DecompressionStream('deflate-raw'));
+const deflateRaw = (u8) => pipeBytes(u8, new CompressionStream('deflate-raw'));
+const utf8 = new TextDecoder('utf-8');
+
+function readZip(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const n = u8.length;
+  const u16 = (p) => dv.getUint16(p, true);
+  const u32 = (p) => dv.getUint32(p, true);
+  const u64 = (p) => Number(dv.getBigUint64(p, true));
+  if (n >= 4 && u8[0] === 0xD0 && u8[1] === 0xCF && u8[2] === 0x11 && u8[3] === 0xE0) {
+    throw new FormatError('ole', '古い形式（.xls）か、パスワード付きのファイルです。Excelで「.xlsx」形式・パスワードなしで保存し直してください。');
+  }
+  let eocd = -1;
+  for (let i = n - 22; i >= 0 && i >= n - 22 - 65535; i--) {
+    if (u8[i] === 0x50 && u8[i + 1] === 0x4B && u8[i + 2] === 0x05 && u8[i + 3] === 0x06) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new FormatError('zip', 'Excel（.xlsx）ファイルとして読み込めませんでした。');
+  let count = u16(eocd + 10);
+  let cdOff = u32(eocd + 16);
+  if ((count === 0xFFFF || cdOff === 0xFFFFFFFF) && eocd >= 20 && u32(eocd - 20) === 0x07064B50) {
+    const z = u64(eocd - 20 + 8);
+    if (z + 56 <= n && u32(z) === 0x06064B50) { count = u64(z + 32); cdOff = u64(z + 48); }
+  }
+  const entries = [];
+  let p = cdOff;
+  for (let k = 0; k < count; k++) {
+    if (p + 46 > n || u32(p) !== 0x02014B50) throw new FormatError('zip', 'ZIPの目次が壊れています。');
+    const e = {
+      versionMade: u16(p + 4), versionNeeded: u16(p + 6), flags: u16(p + 8), method: u16(p + 10),
+      time: u16(p + 12), date: u16(p + 14), crc: u32(p + 16), csize: u32(p + 20), usize: u32(p + 24),
+      intAttr: u16(p + 36), extAttr: u32(p + 38), lho: u32(p + 42),
+    };
+    const nl = u16(p + 28), el = u16(p + 30), cl = u16(p + 32);
+    e.nameBytes = u8.slice(p + 46, p + 46 + nl);
+    e.name = utf8.decode(e.nameBytes);
+    let q = p + 46 + nl;
+    const qe = q + el;
+    while (q + 4 <= qe) {
+      const id = u16(q), sz = u16(q + 2);
+      if (id === 1) {
+        let r = q + 4;
+        if (e.usize === 0xFFFFFFFF) { e.usize = u64(r); r += 8; }
+        if (e.csize === 0xFFFFFFFF) { e.csize = u64(r); r += 8; }
+        if (e.lho === 0xFFFFFFFF) { e.lho = u64(r); r += 8; }
+      }
+      q += 4 + sz;
+    }
+    entries.push(e);
+    p = qe + cl;
+  }
+  const byName = new Map();
+  for (const e of entries) byName.set(e.name, e);
+  return {
+    u8, entries, byName,
+    raw(e) {
+      if (e.lho + 30 > n || u32(e.lho) !== 0x04034B50) throw new FormatError('zip', `ZIPのデータが壊れています: ${e.name}`);
+      const start = e.lho + 30 + u16(e.lho + 26) + u16(e.lho + 28);
+      return u8.subarray(start, start + e.csize);
+    },
+  };
+}
+async function zipRead(zip, name) {
+  const e = zip.byName.get(name);
+  if (!e) throw new KeyError(`There is no item named ${pyRepr(name)} in the archive`);
+  if (e.flags & 1) throw new FormatError('encrypted', '暗号化されたファイルには対応していません。');
+  const raw = zip.raw(e);
+  let out;
+  if (e.method === 0) out = raw.slice();
+  else if (e.method === 8) out = await inflateRaw(raw);
+  else throw new FormatError('zip', `未対応の圧縮形式です（method ${e.method}）: ${name}`);
+  if (crc32(out) !== e.crc) throw new FormatError('zip', `ファイルが壊れています（CRC不一致）: ${name}`);
+  return out;
+}
+/** files: [{nameBytes|name, data|raw, method, crc, csize, usize, time, date, flags, extAttr, intAttr, versionMade, versionNeeded}] */
+function buildZip(files) {
+  const enc = new TextEncoder();
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  for (const f of files) {
+    const nameBytes = f.nameBytes || enc.encode(f.name);
+    const lh = new Uint8Array(30 + nameBytes.length);
+    const dv = new DataView(lh.buffer);
+    dv.setUint32(0, 0x04034B50, true);
+    dv.setUint16(4, f.versionNeeded, true);
+    dv.setUint16(6, f.flags, true);
+    dv.setUint16(8, f.method, true);
+    dv.setUint16(10, f.time, true);
+    dv.setUint16(12, f.date, true);
+    dv.setUint32(14, f.crc, true);
+    dv.setUint32(18, f.csize, true);
+    dv.setUint32(22, f.usize, true);
+    dv.setUint16(26, nameBytes.length, true);
+    dv.setUint16(28, 0, true);
+    lh.set(nameBytes, 30);
+    if (offset > 0xFFFFFFFE || f.csize > 0xFFFFFFFE || f.usize > 0xFFFFFFFE) throw new WriteError('ファイルが大きすぎます（4GB超）');
+    chunks.push(lh, f.raw);
+    central.push({ f, nameBytes, offset });
+    offset += lh.length + f.raw.length;
+  }
+  const cdStart = offset;
+  for (const { f, nameBytes, offset: lho } of central) {
+    const ch = new Uint8Array(46 + nameBytes.length);
+    const dv = new DataView(ch.buffer);
+    dv.setUint32(0, 0x02014B50, true);
+    dv.setUint16(4, f.versionMade, true);
+    dv.setUint16(6, f.versionNeeded, true);
+    dv.setUint16(8, f.flags, true);
+    dv.setUint16(10, f.method, true);
+    dv.setUint16(12, f.time, true);
+    dv.setUint16(14, f.date, true);
+    dv.setUint32(16, f.crc, true);
+    dv.setUint32(20, f.csize, true);
+    dv.setUint32(24, f.usize, true);
+    dv.setUint16(28, nameBytes.length, true);
+    dv.setUint16(36, f.intAttr || 0, true);
+    dv.setUint32(38, f.extAttr || 0, true);
+    dv.setUint32(42, lho, true);
+    ch.set(nameBytes, 46);
+    chunks.push(ch);
+    offset += ch.length;
+  }
+  if (central.length > 0xFFFE) throw new WriteError('ZIPのエントリ数が多すぎます');
+  const eocd = new Uint8Array(22);
+  const dv = new DataView(eocd.buffer);
+  dv.setUint32(0, 0x06054B50, true);
+  dv.setUint16(8, central.length, true);
+  dv.setUint16(10, central.length, true);
+  dv.setUint32(12, offset - cdStart, true);
+  dv.setUint32(16, cdStart, true);
+  chunks.push(eocd);
+  const total = chunks.reduce((a, c) => a + c.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
+/** Copy *zip*, replacing the (uncompressed) contents of some entries. Untouched entries keep their compressed bytes. */
+async function rewriteZip(zip, replaced) {
+  const files = [];
+  const seen = new Set();
+  for (const e0 of zip.entries) {
+    if (seen.has(e0.name)) continue; // duplicate entries confuse Excel
+    seen.add(e0.name);
+    const e = zip.byName.get(e0.name);
+    const rep = replaced.get(e.name);
+    const f = {
+      nameBytes: e.nameBytes, time: e.time, date: e.date, extAttr: e.extAttr, intAttr: e.intAttr,
+      versionMade: e.versionMade,
+    };
+    if (rep) {
+      f.crc = crc32(rep);
+      f.usize = rep.length;
+      if (e.method === 8) { f.method = 8; f.raw = await deflateRaw(rep); f.flags = e.flags & 0x0800; f.versionNeeded = 20; }
+      else { f.method = 0; f.raw = rep; f.flags = e.flags & 0x0800; f.versionNeeded = 10; }
+      f.csize = f.raw.length;
+    } else {
+      f.method = e.method; f.raw = zip.raw(e); f.crc = e.crc; f.csize = e.csize; f.usize = e.usize;
+      f.flags = e.flags & ~0x0008;
+      f.versionNeeded = e.versionNeeded >= 45 ? 20 : e.versionNeeded;
+    }
+    files.push(f);
+  }
+  return buildZip(files);
+}
+/** simple helper used by tests: [{name, data}] -> zip (deflate when asked) */
+async function zipFiles(list, deflate = false) {
+  const files = [];
+  for (const { name, data } of list) {
+    const u8 = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    const raw = deflate ? await deflateRaw(u8) : u8;
+    files.push({
+      name, raw, method: deflate ? 8 : 0, crc: crc32(u8), csize: raw.length, usize: u8.length,
+      time: 0, date: 0x21, flags: 0x0800, extAttr: 0, intAttr: 0, versionMade: 20, versionNeeded: 20,
+    });
+  }
+  return buildZip(files);
+}
+
+/* ======================================================================
+ * ooxml: reading
+ * ==================================================================== */
+function decodeXmlBytes(u8) {
+  if (u8.length >= 2 && u8[0] === 0xFF && u8[1] === 0xFE) return new TextDecoder('utf-16le').decode(u8);
+  if (u8.length >= 2 && u8[0] === 0xFE && u8[1] === 0xFF) return new TextDecoder('utf-16be').decode(u8);
+  const head = utf8.decode(u8.subarray(0, 200));
+  const m = /^\s*<\?xml[^>]*encoding=["']([A-Za-z0-9._-]+)["']/.exec(head);
+  if (m && !/^utf-?8$/i.test(m[1])) {
+    try { return new TextDecoder(m[1]).decode(u8); } catch (e) { /* fall back */ }
+  }
+  return utf8.decode(u8);
+}
+async function readXml(zip, name) { return parseXML(decodeXmlBytes(await zipRead(zip, name))); }
+
+function textOfSi(si) {
+  const parts = [];
+  for (const child of si.children) {
+    if (child.tag === N + 't') parts.push(child.text || '');
+    else if (child.tag === N + 'r') {
+      const t = xfind(child, N + 't');
+      if (t) parts.push(t.text || '');
+    }
+    // rPh (furigana) and phoneticPr are intentionally skipped
+  }
+  return decodeX(parts.join(''));
+}
+/** Decode OOXML _xHHHH_ escapes the way Excel displays them. */
+function decodeX(text) {
+  if (!text.includes('_x')) return text;
+  return text.replace(/_x([0-9A-Fa-f]{4})_/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+}
+function normpath(p) {
+  if (p === '') return '.';
+  let initial = 0;
+  if (p.startsWith('/')) initial = p.startsWith('//') && !p.startsWith('///') ? 2 : 1;
+  const out = [];
+  for (const comp of p.split('/')) {
+    if (comp === '' || comp === '.') continue;
+    if (comp !== '..' || (!initial && !out.length) || (out.length && out[out.length - 1] === '..')) out.push(comp);
+    else if (out.length) out.pop();
+  }
+  const s = '/'.repeat(initial) + out.join('/');
+  return s || '.';
+}
+function resolveTarget(baseDir, target) {
+  if (target.startsWith('/')) return target.replace(/^\/+/, '');
+  return normpath(baseDir + '/' + target);
+}
+
+class Cell {
+  constructor(row, col, value, style, formula) {
+    this.row = row; this.col = col; this.value = value; this.style = style; this.formula = formula;
+  }
+  get ref() { return makeRef(this.row, this.col); }
+}
+class Sheet {
+  constructor(name, path, hidden) {
+    this.name = name; this.path = path; this.hidden = hidden;
+    this.cells = new Map(); // KEY(r,c) -> Cell
+    this.merges = [];
+    this.locked = []; // [[r1, c1, r2, c2], reason]
+    this._max = null;
+  }
+  lockReason(row, col) {
+    for (const [[r1, c1, r2, c2], why] of this.locked) if (r1 <= row && row <= r2 && c1 <= col && col <= c2) return why;
+    return null;
+  }
+  mergeOf(row, col) {
+    for (const m of this.merges) if (m[0] <= row && row <= m[2] && m[1] <= col && col <= m[3]) return m;
+    return null;
+  }
+  value(row, col) { const c = this.cells.get(KEY(row, col)); return c ? c.value : null; }
+  _bounds() {
+    if (!this._max) {
+      let mr = 0, mc = 0;
+      for (const c of this.cells.values()) { if (c.row > mr) mr = c.row; if (c.col > mc) mc = c.col; }
+      for (const m of this.merges) { if (m[2] > mr) mr = m[2]; if (m[3] > mc) mc = m[3]; }
+      this._max = [mr, mc];
+    }
+    return this._max;
+  }
+  get maxRow() { return this._bounds()[0]; }
+  get maxCol() { return this._bounds()[1]; }
+}
+class Styles {
+  constructor() {
+    this.bordered = new Set();
+    this.sides = new Map(); // xf index -> Set of 'left'|'right'|'top'|'bottom'
+    this.heading = new Set();
+  }
+}
+class Workbook {
+  constructor(sheets, styles, zip) { this.sheets = sheets; this.styles = styles; this.zip = zip; this._wareki = new Map(); }
+  get borderedStyles() { return this.styles.bordered; }
+  sheet(name) {
+    if (name == null) {
+      for (const s of this.sheets) if (!s.hidden) return s;
+      if (!this.sheets.length) throw new KeyError('シートがありません');
+      return this.sheets[0];
+    }
+    for (const s of this.sheets) if (s.name === name) return s;
+    throw new KeyError(`sheet not found: ${pyRepr(name)} (have: [${this.sheets.map((s) => pyRepr(s.name)).join(', ')}])`);
+  }
+}
+
+async function readStyles(zip) {
+  const st = new Styles();
+  if (!zip.byName.has('xl/styles.xml')) return st;
+  const root = await readXml(zip, 'xl/styles.xml');
+  const borderSides = [];
+  const borders = xfind(root, N + 'borders');
+  if (borders) {
+    for (const b of xfindall(borders, N + 'border')) {
+      const sides = new Set();
+      for (const side of ['left', 'right', 'top', 'bottom']) {
+        const el = xfind(b, N + side);
+        if (el) { const s = xget(el, 'style', null); if (s !== null && s !== 'none') sides.add(side); }
+      }
+      borderSides.push(sides);
+    }
+  }
+  const headingFonts = new Set();
+  const fonts = xfind(root, N + 'fonts');
+  if (fonts) {
+    xfindall(fonts, N + 'font').forEach((f, i) => {
+      const b = xfind(f, N + 'b');
+      const sz = xfind(f, N + 'sz');
+      const bold = b !== null && !['0', 'false'].includes(xget(b, 'val', '1'));
+      let big = false;
+      if (sz !== null) { try { big = pyFloat(xget(sz, 'val', '11')) >= 14; } catch (e) { big = false; } }
+      if (bold || big) headingFonts.add(i);
+    });
+  }
+  const xfs = xfind(root, N + 'cellXfs');
+  if (xfs) {
+    xfindall(xfs, N + 'xf').forEach((xf, i) => {
+      const bid = pyInt(xget(xf, 'borderId', '0'));
+      if (bid >= 0 && bid < borderSides.length && borderSides[bid].size) {
+        st.bordered.add(i);
+        st.sides.set(i, borderSides[bid]);
+      } else if (bid < 0 && -bid <= borderSides.length && borderSides[borderSides.length + bid].size) {
+        st.bordered.add(i); // Python negative indexing
+        st.sides.set(i, borderSides[borderSides.length + bid]);
+      }
+      if (headingFonts.has(pyInt(xget(xf, 'fontId', '0')))) st.heading.add(i);
+    });
+  }
+  return st;
+}
+
+function readSheetXml(root, sheet, shared) {
+  const sd = xfind(root, N + 'sheetData');
+  if (sd) {
+    let prevR = 0;
+    for (const rowEl of xfindall(sd, N + 'row')) {
+      const r = pyInt(xget(rowEl, 'r', '0')) || prevR + 1;
+      prevR = r;
+      let nextCol = 1;
+      for (const cEl of xfindall(rowEl, N + 'c')) {
+        const ref = xget(cEl, 'r', null);
+        let row, col;
+        if (ref) [row, col] = parseRef(ref); else { row = r; col = nextCol; }
+        nextCol = col + 1;
+        const t = xget(cEl, 't', 'n');
+        const vEl = xfind(cEl, N + 'v');
+        const fEl = xfind(cEl, N + 'f');
+        if (fEl && ['array', 'dataTable'].includes(xget(fEl, 't', null)) && xget(fEl, 'ref', null)) {
+          try { sheet.locked.push([parseRange(xget(fEl, 'ref', null)), 'inside an array formula / spill range']); } catch (e) { if (!(e instanceof ValueError)) throw e; }
+        }
+        const raw = vEl ? vEl.text : null;
+        let value = null;
+        if (t === 's' && raw !== null) {
+          try {
+            let idx = pyInt(raw);
+            if (idx < 0) idx += shared.length;
+            value = idx >= 0 && idx < shared.length ? shared[idx] : null;
+          } catch (e) { value = null; }
+        } else if (t === 'inlineStr') {
+          const isEl = xfind(cEl, N + 'is');
+          value = isEl ? textOfSi(isEl) : null;
+        } else if (t === 'str') {
+          value = raw !== null ? decodeX(raw) : null;
+        } else if (t === 'e') {
+          value = raw;
+        } else if (t === 'b') {
+          value = raw === '1';
+        } else if (raw !== null) {
+          try {
+            const f = pyFloat(raw);
+            if (Number.isInteger(f) && !raw.toUpperCase().includes('E')) value = f;
+            else value = Number.isInteger(f) ? new PyFloat(f) : f;
+          } catch (e) { value = raw; }
+        }
+        sheet.cells.set(KEY(row, col), new Cell(row, col, value, pyInt(xget(cEl, 's', '0')),
+          fEl ? (fEl.text || '') : null));
+      }
+    }
+  }
+  const mc = xfind(root, N + 'mergeCells');
+  if (mc) {
+    for (const m of xfindall(mc, N + 'mergeCell')) {
+      const ref = xget(m, 'ref', null);
+      if (ref) sheet.merges.push(parseRange(ref));
+    }
+  }
+}
+
+/** Header rows of Excel tables (ListObjects) must match their column names. */
+async function readTables(zip, spath, sheet) {
+  const k = spath.lastIndexOf('/');
+  const d = k >= 0 ? spath.slice(0, k) : '', fn = spath.slice(k + 1);
+  const relsPath = `${d}/_rels/${fn}.rels`;
+  if (!zip.byName.has(relsPath)) return;
+  const rels = await readXml(zip, relsPath);
+  for (const r of xfindall(rels, '{' + PKG_RNS + '}Relationship')) {
+    if (!xget(r, 'Type', '').endsWith('/table')) continue;
+    const tpath = resolveTarget(d, xget(r, 'Target', ''));
+    if (!zip.byName.has(tpath)) continue;
+    const t = await readXml(zip, tpath);
+    const ref = xget(t, 'ref', null);
+    if (!ref) continue;
+    const [r1, c1, r2, c2] = parseRange(ref);
+    if (xget(t, 'headerRowCount', '1') !== '0') sheet.locked.push([[r1, c1, r1, c2], `header row of Excel table ${xget(t, 'displayName', '')}`]);
+    if (!['0', ''].includes(xget(t, 'totalsRowCount', '0'))) sheet.locked.push([[r2, c1, r2, c2], 'totals row of an Excel table']);
+  }
+}
+
+/** Load a workbook from bytes (Uint8Array / ArrayBuffer). */
+async function load(input) {
+  const u8 = input instanceof Uint8Array ? input : new Uint8Array(input);
+  const zip = readZip(u8);
+  const names = zip.byName;
+  let shared = [];
+  if (names.has('xl/sharedStrings.xml')) {
+    const sroot = await readXml(zip, 'xl/sharedStrings.xml');
+    shared = xfindall(sroot, N + 'si').map(textOfSi);
+  }
+  if (!names.has('xl/workbook.xml')) throw new FormatError('notxlsx', 'Excelブック（xl/workbook.xml）が見つかりません。.xlsx形式か確認してください。');
+  const wb = await readXml(zip, 'xl/workbook.xml');
+  const rels = await readXml(zip, 'xl/_rels/workbook.xml.rels');
+  const relTarget = new Map();
+  for (const r of xfindall(rels, '{' + PKG_RNS + '}Relationship')) {
+    relTarget.set(xget(r, 'Id', null), resolveTarget('xl', xget(r, 'Target', '')));
+  }
+  const sheets = [];
+  const sheetsEl = xfind(wb, N + 'sheets');
+  for (const s of sheetsEl ? sheetsEl.children : []) {
+    const rid = xget(s, '{' + RNS + '}id', null);
+    const spath = relTarget.get(rid);
+    if (!spath || !names.has(spath)) continue;
+    const sheet = new Sheet(xget(s, 'name', ''), spath, xget(s, 'state', 'visible') !== 'visible');
+    readSheetXml(await readXml(zip, spath), sheet, shared);
+    await readTables(zip, spath, sheet);
+    sheets.push(sheet);
+  }
+  return new Workbook(sheets, await readStyles(zip), zip);
+}
+
+/* ======================================================================
+ * ooxml: writing (non-destructive string surgery)
+ * ==================================================================== */
+const RE_ILLEGAL = /[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+/** Remove characters Excel cannot store (XML-illegal, U+FFFE/FFFF, lone surrogates). */
+function cleanText(value) { return value.replace(RE_ILLEGAL, ''); }
+function checkValue(value) {
+  if (typeof value === 'boolean' || value === null || value === undefined) return;
+  if (typeof value === 'number' || value instanceof PyFloat) {
+    if (!Number.isFinite(Number(value))) throw new WriteError(`Excel cannot store ${pyRepr(value)}`);
+    return;
+  }
+  if (cleanText(pyStr(value)).length > MAX_TEXT) throw new WriteError(`text longer than Excel's limit of ${MAX_TEXT} characters`);
+}
+function xmlText(value) {
+  value = cleanText(value);
+  value = value.replace(/_x(?=[0-9A-Fa-f]{4}_)/g, '_x005F_x'); // protect a literal "_xHHHH_"
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function numRepr(v) { return Number.isInteger(v) ? pyIntStr(v) : pyFloatRepr(v); }
+function cellXml(p, ref, style, value) {
+  const sAttr = style != null && style !== '0' ? ` s="${style}"` : '';
+  if (value == null || value === '') return `<${p}c r="${ref}"${sAttr}/>`;
+  if (typeof value === 'boolean') return `<${p}c r="${ref}"${sAttr} t="b"><${p}v>${value ? 1 : 0}</${p}v></${p}c>`;
+  checkValue(value);
+  if (typeof value === 'number' || value instanceof PyFloat) return `<${p}c r="${ref}"${sAttr}><${p}v>${value instanceof PyFloat ? pyFloatRepr(value.v) : numRepr(value)}</${p}v></${p}c>`;
+  const text = xmlText(pyStr(value));
+  return `<${p}c r="${ref}"${sAttr} t="inlineStr"><${p}is><${p}t xml:space="preserve">${text}</${p}t></${p}is></${p}c>`;
+}
+const RE_ATTR_R = /\br="([^"]+)"/;
+const RE_ATTR_S = /\bs="(\d+)"/;
+const RE_SPANS = new RegExp('[' + WS + ']+spans="[^"]*"', 'gu');
+
+/** updates: iterable of [row, col, value] */
+function setCellsXml(xml, updates) {
+  const m = /<(\w+:)?sheetData\b/.exec(xml);
+  if (!m) throw new WriteError('sheetData not found');
+  const prefix = m[1] || '';
+  const p = escapeRe(prefix);
+  xml = xml.replace(new RegExp(`<${p}sheetData[${WS}]*/>`, 'u'), () => `<${prefix}sheetData></${prefix}sheetData>`);
+  const sdOpen = new RegExp(`<${p}sheetData\\b[^>]*>`).exec(xml);
+  const sdOpenEnd = sdOpen.index + sdOpen[0].length;
+  const sdClose = xml.indexOf(`</${prefix}sheetData>`, sdOpenEnd);
+  if (sdClose < 0) throw new WriteError('sheetData is not closed');
+  const head = xml.slice(0, sdOpenEnd), body = xml.slice(sdOpenEnd, sdClose), tail = xml.slice(sdClose);
+
+  const byRow = new Map();
+  for (const [r, c, v] of updates) {
+    if (!byRow.has(r)) byRow.set(r, new Map());
+    byRow.get(r).set(c, v);
+  }
+  const rowRe = new RegExp(`<${p}row\\b([^>]*?)(?:/>|>(.*?)</${p}row>)`, 'gs');
+  const cellRe = () => new RegExp(`<${p}c\\b([^>]*?)(?:/>|>(.*?)</${p}c>)`, 'gs');
+  const fRe = new RegExp(`<${p}f\\b`);
+
+  const rowIndex = new Map();
+  for (const rm of body.matchAll(rowRe)) {
+    const ra = RE_ATTR_R.exec(rm[1]);
+    if (!ra) throw new WriteError('sheet has rows without r= attributes; re-save it in Excel first');
+    rowIndex.set(pyInt(ra[1]), rm);
+  }
+  const colStyles = colStylesOf(head);
+  const sortedRows = [...rowIndex.keys()].sort((a, b) => a - b);
+
+  let newBody = body;
+  for (const r of [...byRow.keys()].sort((a, b) => b - a)) {
+    const cells = byRow.get(r);
+    const rm = rowIndex.get(r);
+    if (rm === undefined) {
+      const cellXmlStr = [...cells.keys()].sort((a, b) => a - b).map((c) => cellXml(prefix, makeRef(r, c), colStyles.get(c) ?? null, cells.get(c))).join('');
+      const newRow = `<${prefix}row r="${r}">${cellXmlStr}</${prefix}row>`;
+      // before the first existing row with a larger index, else at the ORIGINAL end of
+      // sheetData: rows are processed bottom-up, so this keeps them ascending
+      let pos = body.length;
+      for (const rr of sortedRows) { if (rr > r) { pos = rowIndex.get(rr).index; break; } }
+      newBody = newBody.slice(0, pos) + newRow + newBody.slice(pos);
+      continue;
+    }
+    let attrs = rm[1];
+    let rowBody = rm[2] || '';
+    let inserted = false;
+    let rowStyle = null;
+    if (/\bcustomFormat="(1|true)"/.test(attrs)) { const sr = RE_ATTR_S.exec(attrs); rowStyle = sr ? sr[1] : null; }
+    for (const c of [...cells.keys()].sort((a, b) => b - a)) {
+      const value = cells.get(c);
+      const ref = makeRef(r, c);
+      let found = null, later = null;
+      for (const cm of rowBody.matchAll(cellRe())) {
+        const ca = RE_ATTR_R.exec(cm[1]);
+        if (!ca) throw new WriteError(`row ${r} has cells without r= attributes; unsupported`);
+        const cc = parseRef(ca[1])[1];
+        if (cc === c) { found = cm; break; }
+        if (cc > c && later === null) later = cm;
+      }
+      if (found !== null) {
+        const cbody = found[2] || '';
+        if (fRe.test(cbody)) throw new WriteError(`${ref} contains a formula; refusing to overwrite`);
+        const sm = RE_ATTR_S.exec(found[1]);
+        const nc = cellXml(prefix, ref, sm ? sm[1] : null, value);
+        rowBody = rowBody.slice(0, found.index) + nc + rowBody.slice(found.index + found[0].length);
+      } else {
+        const nc = cellXml(prefix, ref, rowStyle || (colStyles.get(c) ?? null), value);
+        const pos = later !== null ? later.index : rowBody.length;
+        rowBody = rowBody.slice(0, pos) + nc + rowBody.slice(pos);
+        inserted = true;
+      }
+    }
+    if (inserted) attrs = attrs.replace(RE_SPANS, '');
+    attrs = rstripWS(attrs).replace(/\/+$/, '');
+    const newRow = `<${prefix}row${attrs}>${rowBody}</${prefix}row>`;
+    newBody = newBody.slice(0, rm.index) + newRow + newBody.slice(rm.index + rm[0].length);
+  }
+  return head + newBody + tail;
+}
+
+/** Column default styles from <cols> (方眼紙 forms often set the font sheet-wide). */
+function colStylesOf(head) {
+  const out = new Map();
+  for (const m of head.matchAll(/<(?:\w+:)?col\b([^>]*)\/?>/g)) {
+    const a = m[1];
+    const st = /\bstyle="(\d+)"/.exec(a), mn = /\bmin="(\d+)"/.exec(a), mx = /\bmax="(\d+)"/.exec(a);
+    if (!(st && mn && mx) || st[1] === '0') continue;
+    const lo = Number(mn[1]), hi = Math.min(Number(mx[1]), MAX_COL);
+    for (let c = lo; c <= hi; c++) out.set(c, st[1]);
+  }
+  return out;
+}
+/** Structural rules Excel enforces: rows and cells ascending, inside the grid. */
+function checkSheetXml(xml) {
+  const problems = [];
+  const m = /<(\w+:)?sheetData\b/.exec(xml);
+  const p = escapeRe((m && m[1]) || '');
+  let prevR = 0;
+  for (const rm of xml.matchAll(new RegExp(`<${p}row\\b([^>]*?)(?:/>|>(.*?)</${p}row>)`, 'gs'))) {
+    const ra = RE_ATTR_R.exec(rm[1]);
+    const r = ra ? pyInt(ra[1]) : prevR + 1;
+    if (!(prevR < r && r <= MAX_ROW)) problems.push(`row ${r} out of order or range (after ${prevR})`);
+    prevR = r;
+    let prevC = 0;
+    for (const cm of (rm[2] || '').matchAll(new RegExp(`<${p}c\\b([^>]*?)(?:/>|>(.*?)</${p}c>)`, 'gs'))) {
+      const ca = RE_ATTR_R.exec(cm[1]);
+      if (!ca) continue;
+      let rr, cc;
+      try { [rr, cc] = parseRef(ca[1]); } catch (e) { if (e instanceof ValueError) { problems.push(e.message); continue; } throw e; }
+      if (rr !== r || cc <= prevC) problems.push(`cell ${ca[1]} out of order in row ${r}`);
+      prevC = cc;
+    }
+  }
+  return problems;
+}
+
+function forceRecalc(wbXml) {
+  let m = /<(\w+:)?calcPr\b([^>]*?)(\/?)>/.exec(wbXml);
+  if (m) {
+    let attrs = m[2];
+    if (attrs.includes('fullCalcOnLoad')) attrs = attrs.replace(/fullCalcOnLoad="[^"]*"/g, 'fullCalcOnLoad="1"');
+    else attrs = attrs + ' fullCalcOnLoad="1"';
+    return wbXml.slice(0, m.index) + `<${m[1] || ''}calcPr${attrs}${m[3]}>` + wbXml.slice(m.index + m[0].length);
+  }
+  m = /<(\w+:)?workbook\b/.exec(wbXml);
+  const prefix = (m && m[1]) || '';
+  let anchor = -1;
+  for (const tag of ['sheets', 'functionGroups', 'externalReferences', 'definedNames']) {
+    const close = `</${prefix}${tag}>`;
+    const i = wbXml.lastIndexOf(close);
+    if (i >= 0) anchor = Math.max(anchor, i + close.length);
+  }
+  if (anchor < 0) return wbXml;
+  return wbXml.slice(0, anchor) + `<${prefix}calcPr fullCalcOnLoad="1"/>` + wbXml.slice(anchor);
+}
+
+const utf8strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+/** updates: Map(sheetPath -> Map(KEY -> [r, c, value])) -> new xlsx bytes */
+async function saveWithUpdates(wb, updates, recalc = true) {
+  const enc = new TextEncoder();
+  const replaced = new Map();
+  for (const [spath, cells] of updates) {
+    if (!cells.size) continue;
+    let xml;
+    try { xml = utf8strict.decode(await zipRead(wb.zip, spath)); }
+    catch (e) { if (e instanceof TypeError) throw new WriteError(`${spath} is not UTF-8`); throw e; }
+    const newXml = setCellsXml(xml, cells.values());
+    const problems = checkSheetXml(newXml);
+    if (problems.length) throw new WriteError("refusing to write a sheet Excel would reject: " + problems.slice(0, 3).join('; '));
+    replaced.set(spath, enc.encode(newXml));
+  }
+  if (recalc && replaced.size && wb.zip.byName.has('xl/workbook.xml')) {
+    replaced.set('xl/workbook.xml', enc.encode(forceRecalc(utf8strict.decode(await zipRead(wb.zip, 'xl/workbook.xml')))));
+  }
+  return rewriteZip(wb.zip, replaced);
+}
+
+/* ======================================================================
+ * detect: heuristic detection of input fields
+ * ==================================================================== */
+const CHECK_CHARS = '□☐';
+const CHECKED_CHARS = '■☑☒✓✔';
+const BOX_CHARS = CHECK_CHARS + CHECKED_CHARS;
+const HEADING_MARKS = '■●◆◇▼▽▲△★☆◎';
+
+const SP = '[' + WS + '　]';
+const RE_SPACES = new RegExp(SP + '+', 'gu');
+const RE_SPACES1 = new RegExp(SP + '+', 'u');
+const ERA = '(?:明治|大正|昭和|平成|令和|明|大|昭|平|令)';
+const ERA_LIST = `西暦|${ERA}(?:${SP}*[・･、/／]${SP}*${ERA})*`;
+const RE_DATE_ONE = new RegExp(
+  `(?<era>${ERA_LIST})?${SP}*(?<y>\\p{Nd}*)${SP}*年(?<g1>${SP}*)(?<m>\\p{Nd}*)${SP}*月(?<g2>${SP}*)(?<d>\\p{Nd}*)${SP}*日`, 'gu');
+const RE_DATE_PLACEHOLDER = new RegExp(
+  `^(?<pre>.*?)(?<era>${ERA_LIST})?${SP}*(?<y>\\p{Nd}*)${SP}*年${SP}*(?<m>\\p{Nd}*)${SP}*月${SP}*(?<d>\\p{Nd}*)${SP}*日(?<post>.*)$`, 'su');
+const RE_INLINE_BLANK = new RegExp(`^(?<label>[^_＿]{1,30}?)[：:]?${SP}*(?<blank>[_＿]{2,})(?<post>.*)$`, 'sud');
+const RE_OPTION = new RegExp(`[□☐■☑☒✓✔][${WS}]*([^□☐■☑☒✓✔${WS}　（）()、,，]+)`, 'gu');
+const INDEX_HEADER = new Set(['no', 'no.', '№', '番号', '項番', '#', 'ｎｏ', 'ｎｏ．']);
+const TOTAL_WORDS = new Set(['合計', '小計', '計', '総計', '以上', '合計金額']);
+const RE_EXAMPLE_SHEET = /記入例|見本|サンプル|example|sample/i;
+const SEP_CHARS = '－-ー‐−/／:：.．';
+const TEMPLATE_CHARS = new Set([...'〒－-ー‐−()（）:：時分秒年月日歳満生・～〜/／.．', ...SEP_CHARS]);
+const UNIT_TOKENS = new Set([
+  '年', '月', '日', '歳', '才', '円', '万円', '千円', 'ヶ月', 'か月', 'カ月', '箇月', 'ケ月',
+  '時', '分', '秒', '人', '名', '枚', '件', '通', '部', '冊', '台', '回', '号', '番', '番地',
+  '丁目', '階', '泊', '日間', '週間', '%', '％', 'kg', 'cm', '円/月',
+  '－', '-', 'ー', '‐', '−', '〒', '～', '〜', '・', '：', ':', '／', '/', '(', ')', '（', '）',
+  '様', '御中', '殿', '印', '㊞',
+]);
+const HONORIFICS = new Set(['様', '御中', '殿']);
+const CIRCLE_VOCAB = new Set([
+  '男', '女', '男性', '女性', '有', '無', 'あり', 'なし', '有り', '無し', '要', '不要', '可', '否',
+  'はい', 'いいえ', '済', '未', '新規', '更新', '変更', '継続', '自宅', '勤務先', '本人', '代理人',
+  '明', '大', '昭', '平', '令', '明治', '大正', '昭和', '平成', '令和', '同意する', '同意しない',
+  '普通', '当座', '既婚', '未婚', '持家', '借家', '賛成', '反対', '出席', '欠席',
+]);
+const FURIGANA = new Set(['ふりがな', 'フリガナ', 'よみがな', 'ヨミガナ']);
+const BRACKET_PAIRS = { '（': '）', '(': ')', '【': '】', '[': ']', '「': '」', '〔': '〕' };
+
+const RE_TRAIL = /[：:＊*※]+(?=\n?$)/u;
+function normalizeLabel(text) {
+  let t = pyStr(text).replace(RE_SPACES, '');
+  t = pyLstrip(t, '※＊*');
+  t = t.replace(RE_TRAIL, '');
+  // strip brackets only when ONE matching pair encloses the whole label
+  for (;;) {
+    if (cpLen(t) < 2) break;
+    const f = firstCp(t);
+    if (!Object.prototype.hasOwnProperty.call(BRACKET_PAIRS, f) || lastCp(t) !== BRACKET_PAIRS[f] || countSub(t, f) !== 1) break;
+    t = t.slice(f.length, t.length - BRACKET_PAIRS[f].length);
+  }
+  for (const ch of HEADING_MARKS) if (t.startsWith(ch)) t = t.slice(ch.length);
+  return t;
+}
+
+function setKey(s) { return s ? [...s].sort().join(',') : ''; }
+const EMPTY_SET = new Set();
+class Region {
+  constructor(r1, c1, r2, c2, value, merged, bordered, formula = false, style = 0, sides = EMPTY_SET) {
+    this.r1 = r1; this.c1 = c1; this.r2 = r2; this.c2 = c2;
+    this.value = value; this.merged = merged; this.bordered = bordered; this.formula = formula;
+    this.style = style; this.sides = sides;
+    this.text = value == null ? '' : stripWS(pyStr(value));
+    this.key = `${r1},${c1},${r2},${c2}|${merged ? 1 : 0}${bordered ? 1 : 0}${formula ? 1 : 0}|${style}|${setKey(sides)}|${valueKey(value)}`;
+  }
+  get ref() { return makeRef(this.r1, this.c1); }
+  get range() { const a = makeRef(this.r1, this.c1), b = makeRef(this.r2, this.c2); return a === b ? a : `${a}:${b}`; }
+  get empty() { return this.text === '' && !this.formula; }
+  get width() { return this.c2 - this.c1 + 1; }
+  get height() { return this.r2 - this.r1 + 1; }
+}
+/** set of Regions with Python value-equality semantics */
+class RSet {
+  constructor(it) { this.m = new Set(); if (it) for (const r of it) this.add(r); }
+  add(r) { this.m.add(r.key); }
+  addAll(it) { for (const r of it) this.add(r); }
+  has(r) { return r != null && this.m.has(r.key); }
+}
+
+class Field {
+  constructor(id, label, sheet, cell, range, kind, o = {}) {
+    this.id = id; this.label = label; this.sheet = sheet; this.cell = cell; this.range = range; this.kind = kind;
+    this.section = o.section ?? null;
+    this.options = o.options || [];
+    this.columns = o.columns || [];
+    this.rows = o.rows || [];
+    this.parts = o.parts || [];
+    this.template = o.template ?? null;
+    this.suffix = o.suffix ?? null;
+    this.value = o.value ?? null;
+    this.id_hint = o.id_hint ?? null;
+  }
+  static fromDict(d) {
+    let rows = d.rows || [];
+    if (!rows.length && d.kind === 'table' && d.max_rows) {
+      const start = parseInt(String(d.cell).replace(/\D/g, ''), 10);
+      rows = Array.from({ length: Number(d.max_rows) }, (_, i) => start + i);
+    }
+    return new Field(d.id, d.label ?? d.id, d.sheet, d.cell, d.range ?? d.cell, d.kind ?? 'text', {
+      section: d.section ?? null, options: [...(d.options || [])], columns: [...(d.columns || [])], rows: [...rows],
+      parts: [...(d.parts || [])], template: d.template ?? null, suffix: d.suffix ?? null, value: d.value ?? null,
+    });
+  }
+  toDict() {
+    const d = { id: this.id, label: this.label, kind: this.kind, sheet: this.sheet, cell: this.cell, range: this.range };
+    if (this.section) d.section = this.section;
+    if (this.options.length) d.options = this.options;
+    if (this.columns.length) { d.columns = this.columns; d.max_rows = this.rows.length; d.rows = this.rows; }
+    if (this.parts.length) d.parts = this.parts;
+    if (this.template !== null) d.template = this.template;
+    if (this.suffix) d.suffix = this.suffix;
+    if (this.value !== null && this.value !== undefined && this.value !== '') d.value = this.value instanceof PyFloat ? this.value.v : this.value;
+    return d;
+  }
+}
+
+class Grid {
+  constructor(sheet, styles) {
+    if (!(styles instanceof Styles)) { const s = new Styles(); for (const x of styles || []) s.bordered.add(x); styles = s; }
+    this.sheet = sheet;
+    this.styles = styles;
+    this.owner = new Map();
+    this.cache = new Map();
+    this.maxRow = sheet.maxRow;
+    this.maxCol = sheet.maxCol;
+    for (const [r1, c1, r2, c2] of sheet.merges) {
+      const top = sheet.cells.get(KEY(r1, c1));
+      const sides = new Set();
+      for (let r = r1; r <= r2; r++) {
+        for (let cc = c1; cc <= c2; cc++) {
+          const c = sheet.cells.get(KEY(r, cc));
+          if (c) { const s = styles.sides.get(c.style); if (s) for (const x of s) sides.add(x); }
+        }
+      }
+      const reg = new Region(r1, c1, r2, c2, top ? top.value : null, true, sides.size > 0,
+        !!(top && top.formula !== null), top ? top.style : 0, sides);
+      for (let r = r1; r <= r2; r++) for (let cc = c1; cc <= c2; cc++) this.owner.set(KEY(r, cc), reg);
+    }
+  }
+  at(row, col) {
+    if (row < 1 || col < 1 || row > this.maxRow || col > this.maxCol) return null;
+    const k = KEY(row, col);
+    const reg = this.owner.get(k);
+    if (reg !== undefined) return reg;
+    let r = this.cache.get(k);
+    if (r === undefined) {
+      const c = this.sheet.cells.get(k);
+      const style = c ? c.style : 0;
+      const sides = this.styles.sides.get(style) || EMPTY_SET;
+      r = new Region(row, col, row, col, c ? c.value : null, false, sides.size > 0, !!(c && c.formula !== null), style, sides);
+      this.cache.set(k, r);
+    }
+    return r;
+  }
+  atOrBlank(row, col) {
+    const reg = this.at(row, col);
+    return reg !== null ? reg : new Region(row, col, row, col, null, false, false);
+  }
+  headingStyled(reg) { return this.styles.heading.has(reg.style); }
+  regions() {
+    const seen = new Set();
+    const out = [];
+    const keys = new Set([...this.owner.keys(), ...this.sheet.cells.keys()]);
+    for (const k of [...keys].sort((a, b) => a - b)) {
+      const reg = this.at(Math.floor(k / 32768), k % 32768);
+      if (reg === null || seen.has(reg.key)) continue;
+      seen.add(reg.key);
+      if (reg.empty && !(reg.merged || reg.bordered)) continue;
+      out.push(reg);
+    }
+    out.sort((a, b) => a.r1 - b.r1 || a.c1 - b.c1);
+    return out;
+  }
+}
+
+// ---- text classifiers ---------------------------------------------------
+function placeholderDates(text) {
+  const out = [];
+  for (const m of text.matchAll(RE_DATE_ONE)) {
+    const g = m.groups;
+    if (!(g.g1 || g.m) || !(g.g2 || g.d)) continue; // 「生年月日」 is a label, not a placeholder
+    if (g.y && g.m && g.d) continue; // already filled
+    out.push(m);
+  }
+  return out;
+}
+function isPlaceholderDate(text) { return placeholderDates(text).length > 0; }
+function isUnit(text) { return UNIT_TOKENS.has(normalizeLabel(text)) || UNIT_TOKENS.has(stripWS(text)); }
+const RE_SYM_T = new RegExp(`${SP}{2,}|^${SP}+[^${WS}]|${SP}[^${WS}]*(?=\\n?$)`, 'u');
+const RE_TPL_T = new RegExp(`${SP}{2,}|^${SP}+[^${WS}]`, 'u');
+const RE_SP3 = new RegExp(`${SP}{3,}`, 'u');
+function isSymbolTemplate(text) {
+  const raw = pyStr(text);
+  if (!RE_SYM_T.test(raw)) return false;
+  const residue = raw.replace(RE_SPACES, '');
+  if (!residue || cpLen(residue) > 20) return false;
+  for (const ch of residue) if (!TEMPLATE_CHARS.has(ch)) return false;
+  return true;
+}
+function isTemplate(text) {
+  const raw = pyStr(text);
+  if (!RE_TPL_T.test(raw)) return false;
+  const residue = raw.replace(RE_SPACES, '');
+  if (!residue || cpLen(residue) > 20) return false;
+  if ([...residue].every((ch) => TEMPLATE_CHARS.has(ch))) return true;
+  const tokens = stripWS(raw).split(RE_SPACES1).filter((t) => t);
+  if (tokens.every((t) => cpLen(t) === 1)) return false; // 均等割付 label such as 「氏　　名」
+  return tokens.length >= 2 && tokens.every((t) => cpLen(t) <= 8) && RE_SP3.test(raw);
+}
+const RE_CIRCLE_SEP = /[・･/／]/u;
+const RE_CIRCLE_SPACED = new RegExp(`[${WS}　][・･/／]|[・･/／][${WS}　]`, 'u');
+function hasAnyChar(t, chars) { for (const ch of chars) if (t.includes(ch)) return true; return false; }
+function circleOptions(text) {
+  const t = stripWS(text);
+  if (hasAnyChar(t, BOX_CHARS) || cpLen(t) > 30 || !RE_CIRCLE_SEP.test(t)) return null;
+  const parts = t.split(RE_CIRCLE_SEP).map((p) => pyStrip(p, ' 　'));
+  if (!(parts.length >= 2 && parts.length <= 6) || parts.some((p) => !p || cpLen(p) > 6 || RE_SPACES1.test(p))) return null;
+  const spaced = RE_CIRCLE_SPACED.test(t);
+  if (spaced || parts.every((p) => CIRCLE_VOCAB.has(p))) return parts;
+  return null;
+}
+function choiceOptions(text) { return [...text.matchAll(RE_OPTION)].map((m) => m[1]); }
+function nBox(t) { let n = 0; for (const ch of BOX_CHARS) n += countSub(t, ch); return n; }
+const RE_NUMERIC_LABEL = new RegExp(`^[\\p{Nd}０-９,，.．\\-－+＋%％円¥￥${WS}　]+$`, 'u');
+const RE_NUMERIC_HEADER = new RegExp(`^[\\p{Nd}０-９,，.．\\-－+＋%％${WS}　]+$`, 'u');
+function isLabel(reg, maxlen = 40) {
+  if (reg.empty || reg.formula || typeof reg.value !== 'string') return false;
+  const t = reg.text;
+  if (cpLen(t) > maxlen) return false;
+  const nb = nBox(t);
+  const t0 = firstCp(t);
+  if (nb >= 2 || (nb === 1 && !BOX_CHARS.includes(t0))) return false;
+  if (nb === 1 && CHECK_CHARS.includes(t0) && cpLen(stripWS(t)) <= 1) return false;
+  if (isPlaceholderDate(t) || isSymbolTemplate(t) || circleOptions(t)) return false;
+  if (RE_NUMERIC_LABEL.test(t)) return false;
+  if (isUnit(t)) return false;
+  return true;
+}
+const RE_CHAPTER = /^第[^\n]{1,3}[章節部]/u;
+function hasHeadingCue(text) {
+  const t = stripWS(text);
+  return !!t && (HEADING_MARKS.includes(firstCp(t)) || t.startsWith('【') || RE_CHAPTER.test(t));
+}
+function isBox(reg) { return reg != null && reg.empty && (reg.merged || reg.bordered); }
+function dateLikeLabel(label) { return label.endsWith('日') || label.includes('年月日') || label === '日付' || label === '期日'; }
+function rowOf(ref) { return parseInt(ref.replace(/\D/g, ''), 10); }
+function colOf(ref) { return colToIdx(ref.replace(/\d/g, '')); }
+function isStr(v) { return typeof v === 'string'; }
+const RE_ERA_END = new RegExp(ERA + '(?=\\n?$)', 'gu');
+
+function detectSheet(sheet, styles) {
+  const g = new Grid(sheet, styles);
+  const regions = g.regions();
+  const claimed = new RSet();
+  const usedLabels = new RSet();
+  const fields = [];
+
+  const freeLabel = (reg) => reg != null && isLabel(reg) && !usedLabels.has(reg) && !claimed.has(reg) && !hasHeadingCue(reg.text);
+  const leftLabel = (reg, row = null) => {
+    row = row === null ? reg.r1 : row;
+    let c = reg.c1 - 1;
+    while (c >= 1) {
+      const left = g.at(row, c);
+      if (left === null) return null;
+      if (!left.empty) {
+        if (freeLabel(left) && !(g.headingStyled(left) && !left.bordered)) return left;
+        return null;
+      }
+      if (left.merged || left.bordered) return null;
+      c = left.c1 - 1;
+      if (reg.c1 - c > 3) return null;
+    }
+    return null;
+  };
+  const nw = (label, reg, kind, o) => new Field('', label, sheet.name, reg.ref, reg.range, kind, o);
+
+  // ---- 1. tables
+  for (const [tf, headerRegs, bodyRegs] of detectTables(g, regions)) {
+    fields.push(tf);
+    usedLabels.addAll(headerRegs);
+    claimed.addAll(bodyRegs);
+  }
+
+  // ---- 2. things printed inside cells
+  for (const reg of regions) {
+    if (usedLabels.has(reg) || claimed.has(reg) || reg.empty || !isStr(reg.value)) continue;
+    const t = reg.text;
+    const nb = nBox(t);
+    if (nb === 1 && cpLen(t) === 1) {
+      const res = choiceCells(g, reg, claimed, usedLabels);
+      if (res === null) continue;
+      const [parts, optionRegs] = res;
+      const lab = leftLabel(reg);
+      const label = lab ? lab.text : '選択';
+      if (lab) usedLabels.add(lab);
+      const f = nw(label, reg, 'choice_cells', { options: parts.map((p) => p.option), parts });
+      if (optionRegs.length) { const last = optionRegs[optionRegs.length - 1]; f.range = `${reg.ref}:${makeRef(last.r2, last.c2)}`; }
+      const checked = parts.filter((p) => p.checked).map((p) => p.option);
+      f.value = checked.length ? checked : null;
+      for (const p of parts) delete p.checked;
+      fields.push(f);
+      claimed.add(reg);
+      claimed.addAll(optionRegs);
+      continue;
+    }
+    if (nb) {
+      const opts = choiceOptions(t);
+      if (!opts.length) continue;
+      const lab = leftLabel(reg);
+      let first = Infinity;
+      for (const ch of BOX_CHARS) { const k = t.indexOf(ch); if (k >= 0 && k < first) first = k; }
+      let label = pyStrip(t.slice(0, first), ' 　：:');
+      if (opts.length < 2 && lab === null && !label) continue; // 「■ 申込者情報」 is a heading
+      if (!label && lab !== null) label = lab.text;
+      if (lab !== null && label === lab.text) usedLabels.add(lab);
+      const checked = opts.filter((o) => new RegExp(`[${CHECKED_CHARS}][${WS}]*${escapeRe(o)}`, 'u').test(t));
+      fields.push(nw(label || '選択', reg, 'choice', { options: opts, template: pyStr(reg.value), value: checked.length ? checked : null }));
+      claimed.add(reg);
+      continue;
+    }
+    if (isPlaceholderDate(t)) {
+      const lab = leftLabel(reg);
+      const m = RE_DATE_PLACEHOLDER.exec(t);
+      let label = m ? pyStrip(m.groups.pre || '', ' 　：:') : '';
+      label = pyStrip(label.replace(RE_ERA_END, ''), ' 　：:・');
+      if (!label && lab !== null) { label = lab.text; usedLabels.add(lab); }
+      if (!label) label = t.includes('現在') ? '記入日' : '日付';
+      fields.push(nw(label, reg, 'inline_date', { template: pyStr(reg.value) }));
+      claimed.add(reg);
+      continue;
+    }
+    const lab = leftLabel(reg);
+    const opts = lab !== null ? circleOptions(t) : null;
+    if (opts) {
+      usedLabels.add(lab);
+      fields.push(nw(lab.text, reg, 'circle', { options: opts, template: pyStr(reg.value) }));
+      claimed.add(reg);
+      continue;
+    }
+    if (lab !== null && (reg.merged || reg.bordered) && isTemplate(t)) {
+      usedLabels.add(lab);
+      fields.push(nw(lab.text, reg, 'pattern', { template: pyStr(reg.value) }));
+      claimed.add(reg);
+      continue;
+    }
+    if (lab === null && (reg.merged || reg.bordered) && isTemplate(t) && !isSymbolTemplate(t) && !isBox(g.at(reg.r1, reg.c2 + 1))) {
+      const toks = t.split(RE_SPACES1).filter((x) => x);
+      fields.push(nw(toks[toks.length - 1], reg, 'pattern', { template: pyStr(reg.value) }));
+      claimed.add(reg);
+      usedLabels.add(reg);
+      continue;
+    }
+    const m = RE_INLINE_BLANK.exec(t);
+    if (m) {
+      fields.push(nw(stripWS(m.groups.label), reg, 'inline_text', { template: pyStr(reg.value) }));
+      claimed.add(reg);
+      usedLabels.add(reg);
+    }
+  }
+
+  const labels = regions.filter(freeLabel);
+  const labelSet = new RSet(labels);
+
+  // ---- 3. label -> box(es) on the right
+  for (const lab of regions.filter((r) => isLabel(r) && !hasHeadingCue(r.text) && !claimed.has(r))) {
+    if (usedLabels.has(lab) && lab.height === 1) continue;
+    if (!usedLabels.has(lab) && !labelSet.has(lab)) continue;
+    let foundAny = usedLabels.has(lab);
+    for (let row = lab.r1 + (foundAny ? 1 : 0); row <= lab.r2; row++) {
+      const res = scanRight(g, lab, row, claimed, usedLabels);
+      if (res === null) continue;
+      const [kind, boxes, prefix, suffixes] = res;
+      if (row > lab.r1) {
+        const above = g.at(boxes[0].r1 - 1, boxes[0].c1);
+        if (above !== null && above.r1 >= lab.r1 && isLabel(above)) continue; // 決裁 | 部長 / stamp
+      }
+      const label = !foundAny ? lab.text : `${lab.text}(${row - lab.r1 + 1})`;
+      fields.push(makeBoxField(sheet, label, kind, boxes, prefix, suffixes));
+      claimed.addAll(boxes);
+      foundAny = true;
+    }
+    if (foundAny) { usedLabels.add(lab); continue; }
+    if (lab.text.endsWith('：') || lab.text.endsWith(':')) {
+      const nxt = g.atOrBlank(lab.r1, lab.c2 + 1);
+      if (nxt.empty && !claimed.has(nxt)) {
+        claimed.add(nxt);
+        usedLabels.add(lab);
+        fields.push(makeBoxField(sheet, lab.text, 'text', [nxt], null, [null]));
+      }
+    }
+  }
+
+  // ---- 3b. [box] 御中 / 様 / 殿
+  for (const reg of regions) {
+    if (reg.empty || !isStr(reg.value) || !HONORIFICS.has(reg.text)) continue;
+    const left = g.at(reg.r1, reg.c1 - 1);
+    if (isBox(left) && !claimed.has(left)) {
+      claimed.add(left);
+      fields.push(makeBoxField(sheet, '宛名', 'text', [left], null, [reg.text]));
+    }
+  }
+
+  // ---- 4. label -> box below
+  const longLabels = regions.filter((r) => !usedLabels.has(r) && !claimed.has(r) && isLabel(r, 120) && !hasHeadingCue(r.text));
+  for (const lab of longLabels) {
+    if (usedLabels.has(lab)) continue;
+    const below = g.at(lab.r2 + 1, lab.c1);
+    if (isBox(below) && !claimed.has(below) && below.c1 === lab.c1 && below.c2 >= lab.c2) {
+      claimed.add(below);
+      usedLabels.add(lab);
+      fields.push(makeBoxField(sheet, lab.text, 'text', [below], null, [null]));
+    }
+  }
+
+  // ---- 5. filled forms: label -> non-empty box on the right
+  for (const lab of labels) {
+    if (usedLabels.has(lab) || claimed.has(lab)) continue;
+    const right = g.at(lab.r1, lab.c2 + 1);
+    if (right === null || right.empty || claimed.has(right) || usedLabels.has(right) || !(right.merged || right.bordered) ||
+        !(isStr(right.value) || isPyNum(right.value)) || g.headingStyled(right) || hasHeadingCue(pyStr(right.value))) continue;
+    if (isStr(right.value) && isLabel(right)) {
+      const after = g.at(right.r1, right.c2 + 1);
+      if (isBox(after) && !claimed.has(after)) continue; // right is itself a label with its own box
+    }
+    claimed.add(right);
+    usedLabels.add(lab);
+    const f = makeBoxField(sheet, lab.text, 'text', [right], null, [null]);
+    f.value = right.value;
+    fields.push(f);
+  }
+
+  // ---- 6. furigana ids
+  for (const f of fields) {
+    if (FURIGANA.has(normalizeLabel(f.label))) {
+      const labReg = regions.find((r) => r.text === f.label && r.r1 === rowOf(f.cell));
+      if (labReg !== undefined) {
+        const below = g.at(labReg.r2 + 1, labReg.c1);
+        if (below !== null && isLabel(below)) f.id_hint = `${normalizeLabel(below.text)}(ふりがな)`;
+      }
+    }
+  }
+
+  // ---- 7. sections, ids
+  const heads = headings(g, regions, usedLabels, claimed);
+  const groups = groupLabels(g, regions, usedLabels, claimed);
+  for (const f of fields) {
+    const r = rowOf(f.cell), c = colOf(f.cell);
+    let sec = null;
+    for (const [hr, text] of heads) { if (hr <= r) sec = text; else break; }
+    for (const [grp, text] of groups) { if (grp.r1 <= r && r <= grp.r2 && grp.c2 < c) sec = text; }
+    f.section = sec;
+  }
+  fields.sort((a, b) => rowOf(a.cell) - rowOf(b.cell) || colOf(a.cell) - colOf(b.cell));
+  assignIds(fields);
+  return fields;
+}
+
+function scanRight(g, lab, row, claimed, used) {
+  let c = lab.c2 + 1;
+  let prefix = null;
+  let boxes = [];
+  let suffixes = [];
+  let spacer = 0;
+  while (c <= g.maxCol) {
+    const reg = g.at(row, c);
+    if (reg === null || claimed.has(reg)) break;
+    if (reg.r1 !== row && !(reg.r1 <= row && row <= reg.r2)) break;
+    if (reg.empty) {
+      if (reg.merged || reg.bordered) {
+        if (boxes.length && suffixes[suffixes.length - 1] === null && !reg.merged && !boxes[boxes.length - 1].merged) {
+          boxes.push(reg); suffixes.push(null); c = reg.c2 + 1; continue; // digits or underline run
+        }
+        if (boxes.length && suffixes[suffixes.length - 1] === null) break; // separate fields
+        boxes.push(reg); suffixes.push(null); spacer = 0; c = reg.c2 + 1; continue;
+      }
+      spacer += 1;
+      if (spacer > 2) break;
+      c = reg.c2 + 1;
+      continue;
+    }
+    if ((isStr(reg.value) && isUnit(reg.text) && !HONORIFICS.has(reg.text)) || (isStr(reg.value) && HONORIFICS.has(reg.text) && boxes.length)) {
+      if (!boxes.length) {
+        if (prefix === null && cpLen(reg.text) <= 2) { prefix = reg.text; c = reg.c2 + 1; continue; }
+        break;
+      }
+      if (suffixes[suffixes.length - 1] === null) { suffixes[suffixes.length - 1] = reg.text; c = reg.c2 + 1; spacer = 0; continue; }
+      break;
+    }
+    break;
+  }
+  if (!boxes.length) return null;
+  const singleCells = boxes.filter((b) => !b.merged);
+  if (boxes.length >= 3 && singleCells.length === boxes.length && suffixes.every((s) => s === null)) {
+    const sides = new Set();
+    for (const b of boxes) for (const x of b.sides) sides.add(x);
+    if (sides.has('left') || sides.has('right')) return ['digits', boxes, prefix, suffixes];
+    const last = boxes[boxes.length - 1];
+    const merged = new Region(boxes[0].r1, boxes[0].c1, last.r2, last.c2, null, false, true);
+    return ['underline', [merged, ...boxes.slice(1)], prefix, boxes.map(() => null)];
+  }
+  if (boxes.length >= 2) return ['split', boxes, prefix, suffixes];
+  return ['text', boxes, prefix, suffixes];
+}
+
+function makeBoxField(sheet, label, kind, boxes, prefix, suffixes) {
+  const first = boxes[0];
+  const labNorm = normalizeLabel(label);
+  if (kind === 'underline') return new Field('', label, sheet.name, first.ref, first.range, 'text');
+  if (kind === 'split' || kind === 'digits') {
+    const last = boxes[boxes.length - 1];
+    const parts = boxes.map((b, i) => { const p = { cell: b.ref }; if (suffixes[i]) p.suffix = suffixes[i]; return p; });
+    return new Field('', label, sheet.name, first.ref, `${first.ref}:${makeRef(last.r2, last.c2)}`, kind, { parts });
+  }
+  const kind2 = dateLikeLabel(labNorm) ? 'date' : 'text';
+  return new Field('', label, sheet.name, first.ref, first.range, kind2, { suffix: suffixes.length ? suffixes[0] : null });
+}
+
+function choiceCells(g, start, claimed, used) {
+  const parts = [];
+  const optionRegs = [];
+  const row = start.r1;
+  let c = start.c1;
+  for (;;) {
+    let box = g.at(row, c);
+    let gap = 0;
+    while (box !== null && box.empty && gap < 2) { gap += 1; c = box.c2 + 1; box = g.at(row, c); }
+    if (box === null || box.empty) break;
+    const t = box.text;
+    if (!(cpLen(t) === 1 && BOX_CHARS.includes(t))) break;
+    const nxt = g.at(row, box.c2 + 1);
+    if (nxt === null || nxt.empty || !isStr(nxt.value) || hasAnyChar(nxt.text, BOX_CHARS)) break;
+    parts.push({ cell: box.ref, option: stripWS(nxt.text), checked: CHECKED_CHARS.includes(t) });
+    optionRegs.push(nxt);
+    claimed.add(box);
+    c = nxt.c2 + 1;
+  }
+  if (!parts.length) return null;
+  return [parts, optionRegs];
+}
+
+function headings(g, regions, used, claimed) {
+  const byRow = new Map();
+  for (const reg of regions) if (!reg.empty) { if (!byRow.has(reg.r1)) byRow.set(reg.r1, []); byRow.get(reg.r1).push(reg); }
+  const out = [];
+  for (const r of [...byRow.keys()].sort((a, b) => a - b)) {
+    const regs = byRow.get(r);
+    if (regs.length !== 1) continue;
+    const reg = regs[0];
+    if (used.has(reg) || claimed.has(reg) || !isStr(reg.value)) continue;
+    const t = reg.text;
+    if (cpLen(t) > 30) continue;
+    if (!(hasHeadingCue(t) || g.headingStyled(reg))) continue;
+    out.push([r, normalizeLabel(t)]);
+  }
+  return out;
+}
+function groupLabels(g, regions, used, claimed) {
+  const out = [];
+  for (const reg of regions) {
+    if (used.has(reg) || claimed.has(reg) || !isLabel(reg) || reg.height < 3 || reg.width > 4) continue;
+    out.push([reg, normalizeLabel(reg.text)]);
+  }
+  return out;
+}
+function assignIds(fields) {
+  const base = fields.map((f) => f.id_hint || normalizeLabel(f.label) || f.cell);
+  const counts = new Map();
+  for (const b of base) counts.set(b, (counts.get(b) || 0) + 1);
+  const seen = new Map();
+  fields.forEach((f, i) => {
+    const b = base[i];
+    let fid = b;
+    if (counts.get(b) > 1 && f.section) fid = `${f.section}/${b}`;
+    const n = (seen.get(fid) || 0) + 1;
+    seen.set(fid, n);
+    if (n > 1) fid = `${fid}#${n}`;
+    f.id = fid;
+  });
+}
+
+function detectTables(g, regions) {
+  const byRow = new Map();
+  for (const reg of regions) { if (!byRow.has(reg.r1)) byRow.set(reg.r1, []); byRow.get(reg.r1).push(reg); }
+  const consumed = new Set();
+  const usedNames = new Set();
+  const out = [];
+  for (const r of [...byRow.keys()].sort((a, b) => a - b)) {
+    if (consumed.has(r)) continue;
+    const rowRegs = byRow.get(r).slice().sort((a, b) => a.c1 - b.c1);
+    let run = [];
+    const runs = [];
+    for (const reg of rowRegs) {
+      if (isHeader(reg) && (!run.length || reg.c1 === run[run.length - 1].c2 + 1)) run.push(reg);
+      else { if (run.length >= 2) runs.push(run); run = isHeader(reg) ? [reg] : []; }
+    }
+    if (run.length >= 2) runs.push(run);
+    for (const hdr of runs) {
+      const res = tableBody(g, hdr);
+      if (res === null) continue;
+      const [bodyRows, bodyRegs] = res;
+      const cols = hdr.map((h) => ({ id: normalizeLabel(h.text), label: h.text, col: idxToCol(h.c1) }));
+      let label = null;
+      const above = g.at(hdr[0].r1 - 1, hdr[0].c1);
+      const span = hdr[hdr.length - 1].c2 - hdr[0].c1 + 1;
+      if (above !== null && isLabel(above) && above.width * 2 >= span) label = above.text;
+      if (label === null) {
+        label = hdr[0].text;
+        for (const h of hdr) if (cpLen(h.text) > cpLen(label)) label = h.text;
+      }
+      if (usedNames.has(normalizeLabel(label))) label = `${label}#${usedNames.size + 1}`;
+      usedNames.add(normalizeLabel(label));
+      const first = hdr[0];
+      const lastR = bodyRows[bodyRows.length - 1];
+      const f = new Field('', label, g.sheet.name, makeRef(bodyRows[0], first.c1),
+        `${makeRef(bodyRows[0], first.c1)}:${makeRef(lastR, hdr[hdr.length - 1].c2)}`, 'table', { columns: cols, rows: bodyRows });
+      for (let k = hdr[0].r1; k <= lastR; k++) consumed.add(k);
+      out.push([f, hdr, bodyRegs]);
+    }
+  }
+  return out;
+}
+const HEADER_EXCLUDE = new Set(['－', '-', '〒', '～', '・']);
+function isHeader(reg) {
+  if (reg.empty || reg.formula || !isStr(reg.value)) return false;
+  const t = reg.text;
+  if (cpLen(t) > 20 || hasAnyChar(t, BOX_CHARS) || isPlaceholderDate(t) || isSymbolTemplate(t)) return false;
+  if (circleOptions(t) || RE_NUMERIC_HEADER.test(t)) return false;
+  return !HONORIFICS.has(t) && !HEADER_EXCLUDE.has(t);
+}
+const RE_ALL_DIGITS = /^\p{Nd}+$/u;
+function tableBody(g, hdr) {
+  const start = Math.max(...hdr.map((h) => h.r2)) + 1;
+  const rows = [];
+  const bodyRegs = [];
+  let emptyRows = 0;
+  let r = start;
+  while (r <= g.maxRow && rows.length < 500) {
+    const regs = hdr.map((h) => g.at(r, h.c1));
+    if (regs.some((x) => x === null)) break;
+    if (regs.some((x, i) => x.r1 !== r || x.c1 !== hdr[i].c1)) break;
+    let ok = true;
+    for (let i = 0; i < hdr.length; i++) {
+      const h = hdr[i], x = regs[i];
+      if (x.formula) { ok = false; break; }
+      if (x.empty) {
+        if (!(x.merged || x.bordered)) { ok = false; break; }
+        continue;
+      }
+      if (i === 0 && INDEX_HEADER.has(normalizeLabel(h.text).toLowerCase()) && RE_ALL_DIGITS.test(x.text)) continue;
+      if ((x.merged || x.bordered) && !TOTAL_WORDS.has(normalizeLabel(x.text))) continue; // filled cells allowed; totals end it
+      ok = false;
+      break;
+    }
+    if (!ok) break;
+    rows.push(r);
+    bodyRegs.push(...regs);
+    if (regs.every((x, i) => x.empty || (i === 0 && INDEX_HEADER.has(normalizeLabel(hdr[0].text).toLowerCase())))) emptyRows += 1;
+    r = Math.max(...regs.map((x) => x.r2)) + 1;
+  }
+  // a real table has room left: at least one completely empty row
+  if (rows.length < 2 || emptyRows === 0) return null;
+  return [rows, bodyRegs];
+}
+
+function isExampleSheet(name) { return RE_EXAMPLE_SHEET.test(name); }
+function formSheets(wb) {
+  const visible = wb.sheets.filter((s) => !s.hidden);
+  const main = visible.filter((s) => !isExampleSheet(s.name));
+  return main.length ? main : visible.length ? visible : wb.sheets.slice(0, 1);
+}
+function detect(wb, sheet = null) {
+  const sheets = sheet ? [wb.sheet(sheet)] : formSheets(wb);
+  const out = [];
+  for (const s of sheets) out.push(...detectSheet(s, wb.styles));
+  if (new Set(out.map((f) => f.sheet)).size > 1) {
+    const seen = new Map();
+    for (const f of out) seen.set(f.id, (seen.get(f.id) || 0) + 1);
+    for (const f of out) if (seen.get(f.id) > 1) f.id = `${f.sheet}!${f.id}`;
+  }
+  return out;
+}
+
+/* ======================================================================
+ * wareki
+ * ==================================================================== */
+const ERAS = [['令和', 2019, 5, 1], ['平成', 1989, 1, 8], ['昭和', 1926, 12, 25], ['大正', 1912, 7, 30], ['明治', 1868, 1, 25]];
+const RE_ISO = new RegExp(`^[${WS}]*(\\p{Nd}{4})[-/.年](\\p{Nd}{1,2})[-/.月](\\p{Nd}{1,2})日?[${WS}]*$`, 'u');
+function daysIn(y, m) { return [31, (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]; }
+/** -> {y, m, d} | null (only strings, like the Python version) */
+function parseDate(value) {
+  if (typeof value !== 'string') return null;
+  const mt = RE_ISO.exec(value);
+  if (!mt) return null;
+  const y = Number(asciiDigits(mt[1])), m = Number(asciiDigits(mt[2])), d = Number(asciiDigits(mt[3]));
+  if (y < 1 || m < 1 || m > 12 || d < 1 || d > daysIn(y, m)) return null;
+  return { y, m, d };
+}
+function toWareki(dt) {
+  const v = dt.y * 10000 + dt.m * 100 + dt.d;
+  for (const [name, y, m, d] of ERAS) if (v >= y * 10000 + m * 100 + d) return [name, dt.y - y + 1];
+  throw new ValueError(`date before Meiji era: ${dt.y}-${String(dt.m).padStart(2, '0')}-${String(dt.d).padStart(2, '0')}`);
+}
+function warekiYearStr(y) { return y === 1 ? '元' : String(y); }
+
+/* ======================================================================
+ * fill
+ * ==================================================================== */
+const ERA_ABBR = { 明治: '明', 大正: '大', 昭和: '昭', 平成: '平', 令和: '令' };
+const RE_SPLIT = new RegExp(`[-－ー‐−/／:：.．${WS}　()（）]+`, 'u');
+const RE_RANGE_SEP = new RegExp(`[${WS}]*(?:[～〜~]|[${WS}]/[${WS}]|[${WS}]+to[${WS}]+)[${WS}]*`, 'u');
+
+function usesWareki(wb, sheetName) {
+  if (!wb._wareki.has(sheetName)) {
+    let r = false;
+    for (const c of wb.sheet(sheetName).cells.values()) if (isStr(c.value) && /令和|平成|昭和/.test(c.value)) { r = true; break; }
+    wb._wareki.set(sheetName, r);
+  }
+  return wb._wareki.get(sheetName);
+}
+/** Python `x in (a, b, ...)` (== semantics: 1 == True, 0 == False) */
+function pyIn(v, list) { return list.some((x) => (x === undefined ? v === undefined : pyEq(v, x))); }
+function todayDate() { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() + 1, d: n.getDate() }; }
+function dayNumber(d) { return Date.UTC(d.y, d.m - 1, d.d) / 86400000; }
+
+function eraText(eraTpl, d, wareki) {
+  if (eraTpl === '西暦' || (eraTpl == null && !wareki)) return [eraTpl === '西暦' ? '西暦' : '', null];
+  const [name, y] = toWareki(d);
+  if (eraTpl && /[・･、/／]/u.test(eraTpl)) {
+    const items = eraTpl.split(new RegExp(`[・･、/／${WS}　]+`, 'u')).filter((x) => x);
+    if (items.length && items.every((x) => cpLen(x) === 1)) return [ERA_ABBR[name] ?? name, y];
+  }
+  return [name, y];
+}
+function dateText(era, y, d) {
+  if (y === null) return `${era}${d.y}年${d.m}月${d.d}日`;
+  return `${era}${warekiYearStr(y)}年${d.m}月${d.d}日`;
+}
+function age(born, today) {
+  return today.y - born.y - ((today.m < born.m || (today.m === born.m && today.d < born.d)) ? 1 : 0);
+}
+const RE_AGE = new RegExp(`満[${WS}　]+歳`, 'u');
+const RE_DAYS = new RegExp(`[（(][${WS}　]+日間[）)]`, 'u');
+
+/** Render a date (or a from/to pair for ranges) into a placeholder template. today: {y, m, d} */
+function formatDate(value, template, wareki, today = null) {
+  let values;
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    values = [value.from || value.start || null, value.to || value.end || null];
+  } else if (Array.isArray(value)) {
+    values = value.slice();
+  } else if (typeof value === 'string' && RE_RANGE_SEP.test(value)) {
+    values = stripWS(value).split(RE_RANGE_SEP);
+  } else {
+    values = [value];
+  }
+  const dates = values.map(parseDate);
+  if (!dates.length || dates.some((d) => d === null)) return pyStr(value);
+  today = today || todayDate();
+  const ms = template ? placeholderDates(template) : [];
+  if (!ms.length) {
+    const [era, y] = eraText(null, dates[0], wareki);
+    return dateText(era, y, dates[0]);
+  }
+  if (dates.length > ms.length) throw new FillError(`日付欄は${ms.length}個ですが、${dates.length}個の日付が指定されました`);
+  const out = [];
+  let pos = 0;
+  for (let k = 0; k < Math.min(ms.length, dates.length); k++) {
+    const m = ms[k], d = dates[k];
+    const [era, y] = eraText(m.groups.era ?? null, d, wareki);
+    out.push(template.slice(pos, m.index));
+    out.push(dateText(era, y, d));
+    pos = m.index + m[0].length;
+  }
+  out.push(template.slice(pos));
+  let text = out.join('');
+  // （満　　歳） -> age,  （　　日間） -> inclusive length of a range
+  text = text.replace(RE_AGE, () => `満${age(dates[0], today)}歳`);
+  if (dates.length >= 2) {
+    const days = dayNumber(dates[1]) - dayNumber(dates[0]) + 1;
+    text = text.replace(RE_DAYS, () => `（${days}日間）`);
+  }
+  return text;
+}
+
+const RE_CHOICE_AT = new RegExp(`^[${BOX_CHARS}][${WS}]*([^${BOX_CHARS}${WS}　（）()、,，]+)`, 'u');
+const RE_CHOICE_EXTRA = /^([^\n]+?)[（(]([^\n]+)[）)](?=\n?$)/u;
+const RE_CHOICE_PAREN = new RegExp(`^[${WS}　]*[（(][${WS}　]*[）)]`, 'u');
+function formatChoice(template, selected, mark = '■') {
+  let extra = {};
+  if (selected !== null && typeof selected === 'object' && !Array.isArray(selected)) { // {"その他": "親戚"}
+    const entries = Object.entries(selected);
+    extra = {};
+    for (const [k, v] of entries) if (!pyIn(v, [null, true, false, ''])) extra[normalizeLabel(k)] = pyStr(v);
+    selected = entries.filter(([, v]) => !pyIn(v, [null, false])).map(([k]) => k);
+  }
+  if (typeof selected === 'string') selected = [selected];
+  if (!Array.isArray(selected)) throw new TypeError(`選択肢の値として使えません: ${pyRepr(selected)}`);
+  const sel = [];
+  for (let s of selected) {
+    const m = RE_CHOICE_EXTRA.exec(pyStr(s));
+    if (m) { extra[normalizeLabel(m[1])] = m[2]; s = m[1]; } // "その他（親戚）"
+    sel.push(normalizeLabel(pyStr(s)));
+  }
+  const out = [];
+  let i = 0;
+  const found = new Set();
+  while (i < template.length) {
+    const ch = template[i];
+    if (BOX_CHARS.includes(ch)) {
+      const m = RE_CHOICE_AT.exec(template.slice(i));
+      const opt = m ? normalizeLabel(m[1]) : '';
+      if (sel.includes(opt)) {
+        out.push(mark);
+        found.add(opt);
+        if (Object.prototype.hasOwnProperty.call(extra, opt) && m) {
+          const j = i + m[0].length;
+          const pm = RE_CHOICE_PAREN.exec(template.slice(j));
+          if (pm) {
+            out.push(template.slice(i + 1, j) + `（${extra[opt]}）`);
+            i = j + pm[0].length;
+            continue;
+          }
+        }
+      } else {
+        out.push('□');
+      }
+      i += 1;
+      continue;
+    }
+    out.push(ch);
+    i += 1;
+  }
+  const missing = sel.filter((s) => !found.has(s));
+  if (missing.length) throw new FillError(`フォームにない選択肢です: ${missing.join(', ')}`);
+  return out.join('');
+}
+
+/** 「男 ・ 女」 + "女" -> 「男 ・ （女）」 (cells cannot hold a drawn circle) */
+function formatCircle(template, options, selected) {
+  let s;
+  if (typeof selected === 'string') s = selected;
+  else if (Array.isArray(selected) && selected.length) s = selected[0];
+  else throw new TypeError(`選択肢の値として使えません: ${pyRepr(selected)}`);
+  const sel = normalizeLabel(s);
+  const norm = options.map(normalizeLabel);
+  if (!norm.includes(sel)) throw new FillError(`フォームにない選択肢です: ${sel}（選択肢: ${options.join(' / ')}）`);
+  const o = options[norm.indexOf(sel)];
+  const parts = template.split(/([・･/／])/u);
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (normalizeLabel(p) === sel) {
+      const lead = p.slice(0, p.length - pyLstrip(p, ' 　').length);
+      const trail = p.slice(p.replace(/[ 　]+$/u, '').length);
+      parts[i] = `${lead}（${o}）${trail}`;
+      break;
+    }
+  }
+  return parts.join('');
+}
+
+function formatInline(template, value) {
+  const m = RE_INLINE_BLANK.exec(template);
+  if (!m) return pyStr(value);
+  const [start, end] = m.indices.groups.blank;
+  return template.slice(0, start) + pyStr(value) + template.slice(end);
+}
+
+function splitValue(value, n) {
+  if (Array.isArray(value)) return value.slice();
+  const s = stripWS(pyStr(value));
+  let parts = s.split(RE_SPLIT).filter((p) => p !== '');
+  if (parts.length !== n) {
+    const nums = s.match(/\p{Nd}+/gu) || [];
+    if (nums.length === n) parts = nums;
+  }
+  return parts;
+}
+
+const RE_PATTERN_SLOT = new RegExp(`[${WS}　]+`, 'gu');
+/** 「〒　　－」+ "123-4567" -> 「〒123－4567」;  「　時　分」+ "9:30" -> 「9時30分」 */
+function formatPattern(template, value) {
+  let slots = [...template.matchAll(RE_PATTERN_SLOT)].map((m) => [m.index, m.index + m[0].length]);
+  const body = template.replace(/[ 　]+$/u, '');
+  if (body && '－-ー‐−'.includes(lastCp(body))) {
+    const end = body.length;
+    slots = slots.filter((sl) => sl[0] < end).concat([[end, template.length]]);
+  }
+  const parts = splitValue(value, slots.length);
+  if (parts.length === slots.length) {
+    const out = [];
+    let pos = 0;
+    slots.forEach(([a, b], k) => { out.push(template.slice(pos, a)); out.push(pyStr(parts[k])); pos = b; });
+    out.push(template.slice(pos));
+    return out.join('');
+  }
+  if (slots.length && parts.length === 1) {
+    let best = slots[0];
+    if (slots.length !== 1) for (const sl of slots) if (sl[1] - sl[0] > best[1] - best[0]) best = sl;
+    return template.slice(0, best[0]) + pyStr(parts[0]) + template.slice(best[1]);
+  }
+  throw new FillError(`${pyRepr(value)} を「${template}」（空欄${slots.length}個）に当てはめられません。配列で指定してください`);
+}
+
+const RE_NUMSTR = /^(?:[1-9]\p{Nd}{0,14}|0)$/u;
+function num(v) { return typeof v === 'string' && RE_NUMSTR.test(v) ? Number(asciiDigits(v)) : v; }
+
+function resolve(fields, key) {
+  for (const f of fields) if (f.id === key) return f;
+  let pool = fields;
+  const bang = key.indexOf('!');
+  if (bang >= 0) {
+    const sname = key.slice(0, bang), rest = key.slice(bang + 1);
+    const sub = fields.filter((f) => f.sheet === sname);
+    if (sub.length) {
+      pool = sub;
+      key = rest;
+      for (const f of pool) if (f.id === key || f.id === `${sname}!${key}`) return f;
+    }
+  }
+  const nk = normalizeLabel(key);
+  const getters = [
+    (f) => f.id.split('!').pop(),
+    (f) => normalizeLabel(f.label),
+    (f) => f.id.split('!').pop().split('/').pop().split('#')[0],
+  ];
+  for (const get of getters) {
+    const cand = pool.filter((f) => get(f) === nk);
+    if (cand.length === 1) return cand[0];
+  }
+  return null;
+}
+const RE_CELL_KEY = /^(?:(?<sheet>[^!]+)!)?\$?(?<ref>[A-Za-z]{1,3}\$?\p{Nd}+)\n?$/u;
+
+/** The value fill() writes into f.cell for single-cell kinds (throws FillError). */
+function formatFieldValue(wb, f, value, mark = '■', today = null) {
+  if (value == null) return null;
+  if (f.kind === 'inline_date') return formatDate(value, f.template, usesWareki(wb, f.sheet), today);
+  if (f.kind === 'date') return parseDate(value) ? formatDate(value, null, usesWareki(wb, f.sheet), today) : value;
+  if (f.kind === 'choice') return formatChoice(f.template || '', value, mark);
+  if (f.kind === 'circle') return formatCircle(f.template || '', f.options, value);
+  if (f.kind === 'inline_text') return formatInline(f.template || '', value);
+  if (f.kind === 'pattern') return formatPattern(f.template || '', value);
+  return value;
+}
+
+const RE_DIGIT_STRIP = new RegExp(`[-－ー‐−${WS}　]`, 'gu');
+function fillParts(f, value, put, key) {
+  const n = f.parts.length;
+  if (f.kind === 'digits') {
+    const chars = Array.isArray(value) ? value.slice() : Array.from(pyStr(value).replace(RE_DIGIT_STRIP, ''));
+    if (chars.length > n) throw new FillError(`${chars.length}文字は${n}マスに入りません`);
+    for (let k = 0; k < Math.min(n, chars.length); k++) put(f.sheet, f.parts[k].cell, isStr(chars[k]) ? num(chars[k]) : chars[k], key, f.id);
+    return;
+  }
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const bySuffix = new Map(f.parts.map((p) => [normalizeLabel(p.suffix || ''), p]));
+    for (const [k, v] of Object.entries(value)) {
+      const p = bySuffix.get(normalizeLabel(k));
+      if (p === undefined) throw new FillError(`この欄にない区切りです: ${pyRepr(k)}（区切り: ${f.parts.map((x) => x.suffix ?? '-').join(', ')}）`);
+      put(f.sheet, p.cell, isStr(v) ? num(v) : v, key, f.id);
+    }
+    return;
+  }
+  let parts = splitValue(value, n);
+  if (parts.length === 1 && n === 2 && /^\p{Nd}{7}$/u.test(pyStr(parts[0]))) {
+    if (!isStr(parts[0])) throw new TypeError(`${pyRepr(parts[0])} は分割できません`);
+    parts = [parts[0].slice(0, 3), parts[0].slice(3)]; // 郵便番号 1000001 -> 100 / 0001
+  }
+  if (parts.length !== n) throw new FillError(`${n}個に分けて指定してください（区切り: ${f.parts.map((x) => x.suffix ?? '-').join(', ')}）: ${pyRepr(parts)}`);
+  f.parts.forEach((p, k) => put(f.sheet, p.cell, isStr(parts[k]) ? num(parts[k]) : parts[k], key, f.id));
+}
+
+function fillChoiceCells(f, value, put, key, mark) {
+  let sel;
+  if (typeof value === 'string') sel = [value];
+  else if (Array.isArray(value)) sel = value.slice();
+  else if (value !== null && typeof value === 'object') sel = Object.keys(value);
+  else throw new TypeError(`選択肢の値として使えません: ${pyRepr(value)}`);
+  const selN = sel.map((s) => normalizeLabel(pyStr(s)));
+  const opts = f.parts.map((p) => normalizeLabel(p.option));
+  const missing = selN.filter((s) => !opts.includes(s));
+  if (missing.length) throw new FillError(`フォームにない選択肢です: ${missing.join(', ')}`);
+  f.parts.forEach((p, k) => put(f.sheet, p.cell, selN.includes(opts[k]) ? mark : '□', key, f.id));
+}
+
+function fillTable(f, value, put, key) {
+  if (!Array.isArray(value)) throw new FillError('表の値は行の配列で指定してください');
+  if (value.length > f.rows.length) throw new FillError(`表には最大${f.rows.length}行までしか書けません（${value.length}行を指定）`);
+  const colIds = f.columns.map((c) => c.id);
+  value.forEach((row, i) => {
+    const r = f.rows[i];
+    let items;
+    if (row !== null && typeof row === 'object' && !Array.isArray(row)) {
+      items = [];
+      for (const [k, v] of Object.entries(row)) {
+        const nk = normalizeLabel(k);
+        if (!colIds.includes(nk)) throw new FillError(`表にない列です: ${pyRepr(k)}（列: ${colIds.join(', ')}）`);
+        items.push([colIds.indexOf(nk), v]);
+      }
+    } else if (Array.isArray(row)) {
+      if (row.length > colIds.length) throw new FillError(`${i + 1}行目の値が${row.length}個ありますが、表は${colIds.length}列です`);
+      items = row.map((v, ci) => [ci, v]);
+    } else {
+      throw new FillError('表の各行はオブジェクトか配列で指定してください');
+    }
+    for (const [ci, v] of items) put(f.sheet, `${f.columns[ci].col}${r}`, v, `${key}[${i}].${colIds[ci]}`, f.id);
+  });
+}
+
+/** Dry run for multi-cell kinds: [[ref, value], ...] that fill() would write (throws FillError). */
+function previewCells(f, value, mark = '■') {
+  const out = [];
+  const put = (sheetName, ref, v) => out.push([ref, v === undefined ? null : v]);
+  if (f.kind === 'table') fillTable(f, value, put, f.id);
+  else if (f.kind === 'split' || f.kind === 'digits') fillParts(f, value, put, f.id);
+  else if (f.kind === 'choice_cells') fillChoiceCells(f, value, put, f.id, mark);
+  else put(f.sheet, f.cell, value);
+  return out;
+}
+
+async function verify(bytes, written, errors) {
+  const out = await load(bytes);
+  let ok = true;
+  for (const w of written) {
+    const k = w.cell.lastIndexOf('!');
+    const sname = w.cell.slice(0, k), ref = w.cell.slice(k + 1);
+    const [r, c] = parseRef(ref);
+    const got = out.sheet(sname).value(r, c);
+    let want = w.value;
+    if (want === '') want = null;
+    if (!pyEq(got, want) && !(typeof want === 'number' && !Number.isInteger(want) && isPyNum(got) && Math.abs(Number(got) - want) < 1e-9)) {
+      ok = false;
+      errors.push(`verify failed at ${w.cell}: wrote ${pyRepr(want)}, read ${pyRepr(got)}`);
+    }
+  }
+  return ok;
+}
+
+/**
+ * fill(wb, data, {sheet, mark, strict, fields, today}) -> {report, bytes}
+ * report has the same shape as the Python FillReport.to_dict(); bytes is null when nothing was saved.
+ */
+async function fill(wb, data, opts = {}) {
+  const { sheet = null, mark = '■', strict = false, today = null } = opts;
+  let fields = opts.fields || null;
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new FillError('値はJSONオブジェクト（{ "id": 値, ... }）で指定してください');
+  if (!fields) fields = detect(wb, sheet);
+  const report = { verified: null, written: [], unknown_keys: [], unfilled: [], errors: [], ok: false };
+  const updates = new Map();
+  const sheetPath = new Map(wb.sheets.map((s) => [s.name, s.path]));
+  const defaultSheet = sheet ? wb.sheet(sheet).name : formSheets(wb)[0].name;
+  const touched = new Set();
+  const put = (sheetName, ref, value, key, fid) => {
+    let r, c;
+    try { [r, c] = parseRef(ref); } catch (e) { if (e instanceof ValueError) { report.errors.push(`${key}: ${e.message}`); return; } throw e; }
+    const sh = wb.sheet(sheetName);
+    const cell = sh.cells.get(KEY(r, c));
+    if (cell && cell.formula !== null) { report.errors.push(`${key}: ${sheetName}!${ref} は数式セルのため書き込みません`); return; }
+    const why = sh.lockReason(r, c);
+    if (why) { report.errors.push(`${key}: ${sheetName}!${ref} is ${why}; Excel would discard or reject it`); return; }
+    const mg = sh.mergeOf(r, c);
+    if (mg && (mg[0] !== r || mg[1] !== c)) {
+      report.errors.push(`${key}: ${sheetName}!${ref} は結合セルの内側です（hidden inside merged cells）。${makeRef(mg[0], mg[1])} に書き込んでください`);
+      return;
+    }
+    if (isStr(value)) value = cleanText(value);
+    try { checkValue(value); } catch (e) { if (e instanceof WriteError) { report.errors.push(`${key}: ${e.message}`); return; } throw e; }
+    const path = sheetPath.get(sheetName);
+    if (!updates.has(path)) updates.set(path, new Map());
+    updates.get(path).set(KEY(r, c), [r, c, value]);
+    report.written.push({ key, field: fid, cell: `${sheetName}!${ref}`, value: value === undefined ? null : value });
+  };
+  for (const [key, value] of Object.entries(data)) {
+    if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0) ||
+        (typeof value === 'string' && /^(YYYY-MM-DD|YYYY\/MM\/DD)$/i.test(value.trim()))) continue;
+    const f = resolve(fields, key);
+    if (f === null) {
+      const m = RE_CELL_KEY.exec(key);
+      if (m && (m.groups.sheet === undefined || sheetPath.has(m.groups.sheet))) {
+        const sname = m.groups.sheet ?? defaultSheet;
+        const ref = m.groups.ref.replace(/\$/g, '');
+        // "TEL1" looks like a cell address but is almost certainly a field name
+        if (m.groups.sheet === undefined && farOutside(wb.sheet(sname), ref)) { report.unknown_keys.push(key); continue; }
+        put(sname, ref, value, key, null);
+      } else report.unknown_keys.push(key);
+      continue;
+    }
+    touched.add(f.id);
+    try {
+      if (f.kind === 'table') fillTable(f, value, put, key);
+      else if (f.kind === 'split' || f.kind === 'digits') fillParts(f, value, put, key);
+      else if (f.kind === 'choice_cells') fillChoiceCells(f, value, put, key, mark);
+      else put(f.sheet, f.cell, formatFieldValue(wb, f, value, mark, today), key, f.id);
+    } catch (e) {
+      if (e instanceof FillError) report.errors.push(`${key}: ${e.message}`);
+      else throw e;
+    }
+  }
+  report.unfilled = fields.filter((f) => !touched.has(f.id)).map((f) => f.id);
+  if (strict && report.unknown_keys.length) throw new FillError(`unknown keys: ${report.unknown_keys.join(', ')}`);
+  let bytes = null;
+  if (!report.errors.length) {
+    try { bytes = await saveWithUpdates(wb, updates); }
+    catch (e) { if (e instanceof WriteError) report.errors.push(e.message); else throw e; }
+    if (bytes) {
+      report.verified = await verify(bytes, report.written, report.errors);
+      if (!report.verified) bytes = null; // never hand out a file we could not verify
+    }
+  }
+  report.ok = !report.errors.length && !report.unknown_keys.length;
+  return { report, bytes };
+}
+function farOutside(sheet, ref) {
+  let r, c;
+  try { [r, c] = parseRef(ref); } catch (e) { if (e instanceof ValueError) return false; throw e; }
+  return c > Math.max(sheet.maxCol, 26) + 26 || r > Math.max(sheet.maxRow, 100) + 1000;
+}
+
+/* ======================================================================
+ * render (LLM-friendly Markdown) + JSON template (cli.template_for)
+ * ==================================================================== */
+const KIND_JA = {
+  text: 'テキスト', date: '日付', inline_date: '日付(セル内)', choice: '選択', inline_text: 'テキスト(セル内)', table: '表',
+  circle: '選択(○で囲む)', choice_cells: '選択(□別セル)', pattern: '書式入り(〒・電話・時刻)', split: '分割欄', digits: '1文字1マス',
+};
+function cellMd(text) { return text.replace(/\|/g, '\\|').replace(/\n/g, ' '); }
+function sheetToMarkdown(wb, sheetName = null, layout = true) {
+  const sheet = wb.sheet(sheetName);
+  const fields = detectSheet(sheet, wb.styles);
+  const lines = [`# ${sheet.name}`, ''];
+  lines.push('## 入力欄', '', '| id | 種類 | セル | 補足 |', '|---|---|---|---|');
+  for (const f of fields) {
+    let extra = '';
+    if (f.options.length) extra = '選択肢: ' + f.options.join(' / ');
+    else if (f.columns.length) extra = '列: ' + f.columns.map((c) => c.id).join(' / ') + `（最大${f.rows.length}行）`;
+    else if (f.parts.length) extra = 'マス: ' + f.parts.map((p) => p.cell + (p.suffix || '')).join(' ');
+    else if (f.template) extra = '書式: ' + f.template.replace(/\n/g, ' ');
+    if (f.suffix) extra = stripWS(extra + ` 単位: ${f.suffix}`);
+    if (f.value !== null && f.value !== undefined && f.value !== '') extra = stripWS(extra + ` 現在値: ${pyStr(f.value)}`);
+    if (f.section) extra = stripWS(`[${f.section}] ` + extra);
+    lines.push(`| ${cellMd(f.id)} | ${KIND_JA[f.kind] ?? f.kind} | ${f.range} | ${cellMd(extra)} |`);
+  }
+  if (!fields.length) lines.push('| (検出なし) | | | |');
+  lines.push('');
+  if (layout) {
+    const g = new Grid(sheet, wb.styles);
+    const boxRefs = new Set(fields.filter((f) => f.kind === 'text' || f.kind === 'date').map((f) => f.cell));
+    const byRow = new Map();
+    for (const reg of g.regions()) { if (!byRow.has(reg.r1)) byRow.set(reg.r1, []); byRow.get(reg.r1).push(reg); }
+    lines.push('## レイアウト（論理行）', '');
+    let prev = null;
+    let repeat = 0;
+    for (const r of [...byRow.keys()].sort((a, b) => a - b)) {
+      const parts = [];
+      for (const reg of byRow.get(r).slice().sort((a, b) => a.c1 - b.c1)) {
+        if (reg.formula && !reg.text) parts.push('（数式）');
+        else if (reg.empty) parts.push(boxRefs.has(reg.ref) ? `［${reg.ref}］` : '［ ］');
+        else parts.push(cellMd(reg.text));
+      }
+      const line = parts.join(' ｜ ');
+      const sig = pyStrip(line.split('［ ］').join(''), ' ｜');
+      if (prev !== null && sig === prev && sig === '') { repeat += 1; continue; }
+      if (repeat) { lines.push(`…（空行 ×${repeat}）`); repeat = 0; }
+      prev = sig;
+      lines.push(`- R${r}: ${line}`);
+    }
+    if (repeat) lines.push(`…（空行 ×${repeat}）`);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+function workbookToMarkdown(wb, layout = true) {
+  return wb.sheets.filter((s) => !s.hidden).map((s) => sheetToMarkdown(wb, s.name, layout)).join('\n');
+}
+function templateFor(fields) {
+  const out = {};
+  for (const f of fields) {
+    out[f.id] = f.kind === 'table' ? [] : null; // null = leave untouched
+  }
+  return out;
+}
+
+root.Masume = {
+  // reading / writing
+  load, saveWithUpdates, setCellsXml, checkSheetXml, cleanText, forceRecalc, parseXML, textOfSi,
+  // detection
+  detect, detectSheet, Grid, Field, Region, normalizeLabel, isLabel, formSheets,
+  // filling
+  fill, formatDate, formatChoice, formatCircle, formatPattern, formatInline, formatFieldValue, resolve,
+  parseDate, toWareki, usesWareki, placeholderDates, previewCells,
+  // rendering
+  sheetToMarkdown, workbookToMarkdown, templateFor, KIND_JA,
+  // helpers
+  parseRef, makeRef, parseRange, colToIdx, idxToCol, pyStr, pyRepr, pyFloatRepr, PyFloat,
+  crc32, readZip, zipRead, zipFiles, inflateRaw, deflateRaw,
+  FillError, WriteError, FormatError, ValueError, KeyError,
+};
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+</script>
+
+<script id="ui">
+(function () {
+'use strict';
+const M = window.Masume;
+const $ = (sel) => document.querySelector(sel);
+
+const KIND_UI = {
+  text: 'テキスト', date: '日付', inline_date: '日付', choice: '選択', choice_cells: '選択', circle: '○で囲む',
+  inline_text: 'セル内記入', pattern: '書式つき記入', split: '分割記入', digits: '1マス1文字', table: '表',
+};
+
+const state = {
+  wb: null, fileName: '', fields: [], ctrls: new Map(), extras: {}, jsonDirty: false, busy: false,
+};
+
+/* ---------------- small DOM helper ---------------- */
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === null || v === undefined || v === false) continue;
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? '' : v);
+    }
+  }
+  for (const kid of kids.flat(Infinity)) if (kid !== null && kid !== undefined && kid !== false) el.append(kid);
+  return el;
+}
+
+/* ---------------- loading ---------------- */
+const drop = $('#drop');
+const fileInput = $('#file');
+function showLoadError(msg) {
+  const el = $('#load-error');
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+async function openFile(file) {
+  if (!file || state.busy) return;
+  showLoadError('');
+  state.busy = true;
+  drop.setAttribute('aria-busy', 'true');
+  try {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const wb = await M.load(buf);
+    if (!wb.sheets.length) throw new Error('ワークシートが見つかりませんでした。');
+    state.wb = wb;
+    state.fileName = file.name;
+    state.fields = M.detect(wb);
+    state.extras = {};
+    state.jsonDirty = false;
+    renderApp();
+  } catch (e) {
+    console.error(e);
+    showLoadError(e instanceof M.FormatError ? e.message : `読み込めませんでした: ${e.message || e}`);
+  } finally {
+    state.busy = false;
+    drop.removeAttribute('aria-busy');
+    fileInput.value = '';
+  }
+}
+fileInput.addEventListener('change', () => openFile(fileInput.files[0]));
+// built-in sample so the page works before the user has a form at hand
+const SAMPLE_XLSX = "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";
+$('#sample').addEventListener('click', () => {
+  const bin = atob(SAMPLE_XLSX);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  openFile(new File([bytes], 'サンプル_休暇届.xlsx'));
+});
+['dragenter', 'dragover'].forEach((t) => window.addEventListener(t, (e) => {
+  e.preventDefault();
+  if (!$('#start').hidden) drop.classList.add('over');
+}));
+['dragleave', 'drop'].forEach((t) => window.addEventListener(t, (e) => {
+  e.preventDefault();
+  if (t === 'dragleave' && e.relatedTarget) return;
+  drop.classList.remove('over');
+}));
+window.addEventListener('drop', (e) => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) openFile(f);
+});
+$('#reset').addEventListener('click', () => {
+  state.wb = null;
+  state.fields = [];
+  state.ctrls = new Map();
+  $('#app').hidden = true;
+  $('#actionbar').hidden = true;
+  $('#start').hidden = false;
+  $('#report').textContent = '';
+  window.scrollTo(0, 0);
+});
+
+/* ---------------- value helpers ---------------- */
+function coerceNumber(s) {
+  const t = s.trim();
+  if (/^-?(?:0|[1-9]\d{0,14})(?:\.\d+)?$/.test(t)) return Number(t);
+  if (/^-?[1-9]\d{0,2}(?:,\d{3}){1,4}(?:\.\d+)?$/.test(t)) return Number(t.replace(/,/g, ''));
+  return s;
+}
+function display(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+function isoOf(d) { return `${String(d.y).padStart(4, '0')}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`; }
+function sameOpt(a, b) { return M.normalizeLabel(a) === M.normalizeLabel(b); }
+
+/* A controller keeps the exact JSON value it was given until the user edits the widget. */
+function makeCtrl(f, read, write) {
+  const ctrl = {
+    f, touched: false, hasSet: false, setVal: undefined, preview: null,
+    get() { return !this.touched && this.hasSet ? this.setVal : read(); },
+    set(v) { this.hasSet = true; this.setVal = v; this.touched = false; write(v); },
+    edited() { this.touched = true; onFieldChange(f); },
+  };
+  return ctrl;
+}
+
+/* ---------------- form rendering ---------------- */
+let uid = 0;
+function renderField(f) {
+  const id = `fld${++uid}`;
+  const labelText = M.normalizeLabel(f.label) || f.label || f.cell;
+  const meta = [KIND_UI[f.kind] || f.kind, f.range];
+  const head = h('div', { class: 'f-head' },
+    h('label', { class: 'f-label', for: id, id: id + '-l' }, labelText),
+    h('span', { class: 'f-meta', title: `JSONのキー: ${f.id}` }, meta.join(' · ')));
+  const body = h('div', { class: 'f-body' });
+  const preview = h('div', { class: 'f-preview', 'aria-live': 'polite' });
+  let ctrl;
+  if (f.kind === 'table') ctrl = tableCtrl(f, id, body);
+  else if (f.kind === 'choice' || f.kind === 'choice_cells' || f.kind === 'circle') ctrl = choiceCtrl(f, id, body);
+  else if (f.kind === 'date' || f.kind === 'inline_date') ctrl = dateCtrl(f, id, body);
+  else if (f.kind === 'split') ctrl = splitCtrl(f, id, body);
+  else ctrl = textCtrl(f, id, body);
+  const hints = [];
+  if (f.template && f.kind !== 'choice' && f.kind !== 'circle') hints.push(`元の表示: ${f.template.replace(/\n/g, ' ')}`);
+  if (f.value !== null && f.value !== undefined && f.value !== '' && f.kind !== 'table') hints.push(`現在の値: ${Array.isArray(f.value) ? f.value.join('・') : M.pyStr(f.value)}（空欄のままなら変更しません）`);
+  if (f.id !== labelText) hints.push(`キー: ${f.id}`);
+  for (const t of hints) body.append(h('div', { class: 'f-hint' }, t));
+  ctrl.preview = preview;
+  state.ctrls.set(f.id, ctrl);
+  return h('div', { class: 'field', 'data-kind': f.kind }, head, body, preview);
+}
+
+function textCtrl(f, id, body) {
+  let tall = false;
+  try { const [r1, , r2] = M.parseRange(f.range); tall = r2 > r1 && f.kind === 'text'; } catch (e) { /* ignore */ }
+  const attrs = { id, type: 'text', autocomplete: 'off' };
+  if (f.kind === 'digits') Object.assign(attrs, { inputmode: 'numeric', class: 'digits', placeholder: '□'.repeat(f.parts.length) });
+  if (f.kind === 'pattern') attrs.placeholder = /[〒]/.test(f.template || '') ? '例: 100-0001' : /時/.test(f.template || '') ? '例: 9:30' : /[（(]/.test(f.template || '') ? '例: 03-1234-5678' : '';
+  const el = tall ? h('textarea', { id, rows: 3 }) : h('input', attrs);
+  if (f.value !== null && f.value !== undefined && f.kind === 'text' && !el.placeholder) el.placeholder = M.pyStr(f.value);
+  const row = h('div', { class: 'f-row' }, el);
+  if (f.suffix) { el.style.flex = '1'; row.append(h('span', { class: 'f-hint' }, f.suffix)); }
+  body.append(row);
+  const coerce = f.kind === 'text';
+  const ctrl = makeCtrl(f,
+    () => (el.value === '' ? undefined : coerce ? coerceNumber(el.value) : el.value),
+    (v) => { el.value = display(v); if (v === null) el.placeholder = '（null: セルを空にします）'; });
+  el.addEventListener('input', () => ctrl.edited());
+  return ctrl;
+}
+
+function splitCtrl(f, id, body) {
+  let mode = 'parts';
+  const inputs = f.parts.map((p, k) => h('input', {
+    type: 'text', autocomplete: 'off', id: k === 0 ? id : null, class: 'part',
+    'aria-label': `${M.normalizeLabel(f.label)} ${k + 1}${p.suffix ? `（${p.suffix}）` : ''}`,
+  }));
+  const partsRow = h('div', { class: 'f-row parts' }, inputs.map((inp, k) => [inp, f.parts[k].suffix ? h('span', { class: 'suffix' }, f.parts[k].suffix) : (k < inputs.length - 1 ? h('span', { class: 'suffix' }, '/') : null)]));
+  const whole = h('input', { type: 'text', autocomplete: 'off', hidden: true, placeholder: 'まとめて入力（例: 5年3ヶ月、090-1234-5678）', 'aria-labelledby': id + '-l' });
+  const toggle = h('button', { type: 'button', class: 'link' }, 'まとめて入力');
+  const setMode = (m) => { mode = m; partsRow.hidden = m !== 'parts'; whole.hidden = m === 'parts'; toggle.textContent = m === 'parts' ? 'まとめて入力' : 'マスごとに入力'; };
+  body.append(partsRow, whole, h('div', { class: 'opt-tools' }, toggle));
+  const ctrl = makeCtrl(f,
+    () => {
+      if (mode === 'whole') return whole.value === '' ? undefined : whole.value;
+      const vals = inputs.map((i) => i.value);
+      return vals.every((v) => v === '') ? undefined : vals;
+    },
+    (v) => {
+      for (const i of inputs) i.value = '';
+      whole.value = '';
+      if (Array.isArray(v)) { setMode('parts'); v.forEach((x, k) => { if (k < inputs.length) inputs[k].value = display(x); }); }
+      else if (v && typeof v === 'object') {
+        setMode('parts');
+        for (const [k, x] of Object.entries(v)) {
+          const idx = f.parts.findIndex((p) => M.normalizeLabel(p.suffix || '') === M.normalizeLabel(k));
+          if (idx >= 0) inputs[idx].value = display(x);
+        }
+      } else if (v === null || v === undefined) setMode('parts');
+      else { setMode('whole'); whole.value = display(v); }
+    });
+  for (const i of [...inputs, whole]) i.addEventListener('input', () => ctrl.edited());
+  toggle.addEventListener('click', () => { setMode(mode === 'parts' ? 'whole' : 'parts'); ctrl.edited(); (mode === 'parts' ? inputs[0] : whole).focus(); });
+  return ctrl;
+}
+
+function dateCtrl(f, id, body) {
+  let mode = 'date';
+  const slots = f.kind === 'inline_date' && f.template ? Math.max(1, M.placeholderDates(f.template).length) : 1;
+  const names = slots === 2 ? ['開始', '終了'] : Array.from({ length: slots }, (_, k) => `${k + 1}つ目`);
+  const dateEls = Array.from({ length: slots }, (_, k) => h('input', { type: 'date', id: k === 0 ? id : null, 'aria-label': slots > 1 ? names[k] : null }));
+  const textEl = h('input', { type: 'text', autocomplete: 'off', placeholder: slots > 1 ? '例: 2026-12-01～2026-12-03' : '例: 2026-11-19、未定', hidden: true, 'aria-labelledby': id + '-l' });
+  const toggle = h('button', { type: 'button', class: 'link' }, '文字で入力');
+  const today = h('button', { type: 'button', class: 'link' }, '今日');
+  const dateRow = h('div', { class: 'f-row' }, dateEls.map((el, k) => [slots > 1 ? h('span', { class: 'f-hint' }, names[k]) : null, el, k < slots - 1 ? h('span', { class: 'f-hint' }, '～') : null]));
+  const setMode = (m) => {
+    mode = m;
+    dateRow.hidden = m !== 'date';
+    textEl.hidden = m === 'date';
+    toggle.textContent = m === 'date' ? '文字で入力' : 'カレンダーで入力';
+  };
+  body.append(dateRow, textEl, h('div', { class: 'opt-tools' }, today, toggle));
+  const readDates = () => {
+    const vals = dateEls.map((el) => el.value).filter((x) => x);
+    if (!vals.length) return undefined;
+    return vals.length === 1 ? vals[0] : vals;
+  };
+  const ctrl = makeCtrl(f,
+    () => (mode === 'date' ? readDates() : (textEl.value === '' ? undefined : textEl.value)),
+    (v) => {
+      for (const el of dateEls) el.value = '';
+      textEl.value = '';
+      let list = null;
+      if (typeof v === 'string') list = [v];
+      else if (Array.isArray(v)) list = v;
+      else if (v && typeof v === 'object') list = [v.from || v.start, v.to || v.end];
+      const parsed = list ? list.map((x) => (typeof x === 'string' ? M.parseDate(x) : null)) : null;
+      if (v === null || v === undefined) { setMode('date'); return; }
+      if (parsed && parsed.length <= slots && parsed.every((d) => d)) {
+        setMode('date');
+        parsed.forEach((d, k) => { dateEls[k].value = isoOf(d); });
+      } else {
+        setMode('text');
+        textEl.value = Array.isArray(v) && v.every((x) => typeof x === 'string') ? v.join('～') : display(v);
+      }
+    });
+  toggle.addEventListener('click', () => {
+    if (mode === 'date') {
+      const vals = dateEls.map((el) => el.value).filter((x) => x);
+      textEl.value = vals.join('～');
+      setMode('text');
+      textEl.focus();
+    } else {
+      const parts = textEl.value.split(/\s*[～〜~]\s*/);
+      dateEls.forEach((el, k) => { const d = parts[k] ? M.parseDate(parts[k]) : null; el.value = d ? isoOf(d) : ''; });
+      setMode('date');
+      dateEls[0].focus();
+    }
+    ctrl.edited();
+  });
+  today.addEventListener('click', () => {
+    const n = new Date();
+    const iso = isoOf({ y: n.getFullYear(), m: n.getMonth() + 1, d: n.getDate() });
+    if (mode === 'date') dateEls[0].value = iso; else textEl.value = iso;
+    ctrl.edited();
+  });
+  for (const el of dateEls) { el.addEventListener('input', () => ctrl.edited()); el.addEventListener('change', () => ctrl.edited()); }
+  textEl.addEventListener('input', () => ctrl.edited());
+  return ctrl;
+}
+
+const BOXES = '□☐■☑☒✓✔';
+const RE_EXTRA_VALUE = /^(.+?)[（(](.+)[）)]$/u;
+function choiceCtrl(f, id, body) {
+  const allowMulti = f.kind !== 'circle';
+  let multi = false;
+  const name = id + '-opt';
+  const box = h('div', { class: 'opts', role: 'group', 'aria-labelledby': id + '-l' });
+  const inputs = [];
+  // 「□その他（　　）」: the option takes a free-text note
+  const extraEls = new Map();
+  if (f.kind === 'choice' && f.template) {
+    for (const opt of f.options) {
+      const esc = opt.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&');
+      if (new RegExp(`[${BOXES}][\\s　]*${esc}[\\s　]*[（(][\\s　]*[）)]`, 'u').test(f.template)) {
+        const el = h('input', { type: 'text', autocomplete: 'off', placeholder: `${opt}の内容`, 'aria-label': `${opt}の内容`, hidden: true });
+        el.addEventListener('input', () => ctrl.edited());
+        extraEls.set(opt, el);
+      }
+    }
+  }
+  const syncExtras = () => { for (const inp of inputs) { const el = extraEls.get(inp.value); if (el) el.hidden = !inp.checked; } };
+  const build = () => {
+    const keep = new Set(inputs.filter((i) => i.checked).map((i) => i.value));
+    box.textContent = '';
+    inputs.length = 0;
+    f.options.forEach((opt, i) => {
+      const inp = h('input', { type: multi ? 'checkbox' : 'radio', name, value: opt, id: i === 0 ? id : null });
+      inp.checked = keep.has(opt);
+      inp.addEventListener('change', () => { syncExtras(); ctrl.edited(); });
+      inputs.push(inp);
+      box.append(h('label', { class: 'opt' }, inp, h('span', null, opt)));
+    });
+    syncExtras();
+  };
+  const multiBox = h('input', { type: 'checkbox' });
+  const clear = h('button', { type: 'button', class: 'link' }, '選択を外す');
+  body.append(box, ...extraEls.values(), h('div', { class: 'opt-tools' }, allowMulti ? h('label', null, multiBox, '複数選択') : null, clear));
+  const ctrl = makeCtrl(f,
+    () => {
+      const sel = inputs.filter((i) => i.checked).map((i) => {
+        const el = extraEls.get(i.value);
+        return el && el.value.trim() ? `${i.value}（${el.value.trim()}）` : i.value;
+      });
+      if (!sel.length) return undefined;
+      return multi ? sel : sel[0];
+    },
+    (v) => {
+      let list = [];
+      if (typeof v === 'string') list = [v];
+      else if (Array.isArray(v)) list = v.map((x) => M.pyStr(x));
+      else if (v && typeof v === 'object') list = Object.entries(v).filter(([, x]) => x !== null && x !== false).map(([k, x]) => (typeof x === 'string' && x ? `${k}（${x}）` : k));
+      multi = allowMulti && list.length > 1;
+      multiBox.checked = multi;
+      for (const el of extraEls.values()) el.value = '';
+      build();
+      for (const item of list) {
+        let opt = item, note = '';
+        const m = RE_EXTRA_VALUE.exec(item);
+        if (m && f.options.some((o) => sameOpt(o, m[1]))) { opt = m[1]; note = m[2]; }
+        for (const inp of inputs) {
+          if (!sameOpt(opt, inp.value) || (!multi && inputs.some((x) => x.checked))) continue;
+          inp.checked = true;
+          if (note && extraEls.has(inp.value)) extraEls.get(inp.value).value = note;
+        }
+      }
+      syncExtras();
+    });
+  multiBox.addEventListener('change', () => {
+    multi = multiBox.checked;
+    if (!multi) { let seen = false; for (const inp of inputs) { if (inp.checked && seen) inp.checked = false; if (inp.checked) seen = true; } }
+    build();
+    ctrl.edited();
+  });
+  clear.addEventListener('click', () => { for (const inp of inputs) inp.checked = false; syncExtras(); ctrl.edited(); });
+  build();
+  return ctrl;
+}
+
+function tableCtrl(f, id, body) {
+  const colIds = f.columns.map((c) => c.id);
+  const grid = [];
+  const sheet = state.wb.sheet(f.sheet);
+  const thead = h('tr', null, h('th', { scope: 'col', 'aria-label': '行' }, ''), f.columns.map((c) => h('th', { scope: 'col' }, c.label)));
+  const tbody = h('tbody');
+  f.rows.forEach((r, i) => {
+    const cells = f.columns.map((c, ci) => {
+      let current = '';
+      try { const [rr, cc] = M.parseRef(`${c.col}${r}`); const v = sheet.value(rr, cc); current = v === null ? '' : M.pyStr(v); } catch (e) { /* ignore */ }
+      const inp = h('input', { type: 'text', autocomplete: 'off', placeholder: current, id: i === 0 && ci === 0 ? id : null, 'aria-label': `${i + 1}行目 ${c.label}` });
+      inp.addEventListener('input', () => ctrl.edited());
+      return inp;
+    });
+    grid.push(cells);
+    tbody.append(h('tr', null, h('td', { class: 'rn' }, String(i + 1)), cells.map((inp) => h('td', null, inp))));
+  });
+  body.append(h('div', { class: 'table-wrap' }, h('table', { class: 'grid' }, h('thead', null, thead), tbody)));
+  body.append(h('div', { class: 'f-hint' }, `最大${f.rows.length}行。空欄のセルは書き換えません（薄い文字は元から入っている値）。`));
+  const ctrl = makeCtrl(f,
+    () => {
+      const rows = grid.map((cells) => {
+        const o = {};
+        cells.forEach((inp, ci) => { if (inp.value !== '') o[colIds[ci]] = coerceNumber(inp.value); });
+        return o;
+      });
+      while (rows.length && !Object.keys(rows[rows.length - 1]).length) rows.pop();
+      return rows.length ? rows : undefined;
+    },
+    (v) => {
+      for (const cells of grid) for (const inp of cells) inp.value = '';
+      if (!Array.isArray(v)) return;
+      v.forEach((row, i) => {
+        if (i >= grid.length) return;
+        if (Array.isArray(row)) row.forEach((x, ci) => { if (ci < colIds.length) grid[i][ci].value = display(x); });
+        else if (row && typeof row === 'object') {
+          for (const [k, x] of Object.entries(row)) {
+            const ci = colIds.indexOf(M.normalizeLabel(k));
+            if (ci >= 0) grid[i][ci].value = display(x);
+          }
+        }
+      });
+    });
+  return ctrl;
+}
+
+function renderForm() {
+  const host = $('#form-fields');
+  host.textContent = '';
+  state.ctrls = new Map();
+  const fields = state.fields;
+  if (!fields.length) {
+    host.append(h('div', { class: 'card empty' },
+      h('p', null, '入力欄を自動で見つけられませんでした。'),
+      h('p', { class: 'help' }, '「JSON」タブでセル番地を直接指定して記入できます（例: { "B3": "山田 太郎", "Sheet1!D10": "2026年11月19日" }）。')));
+    return;
+  }
+  const multiSheet = new Set(fields.map((f) => f.sheet)).size > 1;
+  let curSheet = null, curSection, card = null;
+  for (const f of fields) {
+    if (multiSheet && f.sheet !== curSheet) {
+      host.append(h('h2', { class: 'sheet-title' }, f.sheet));
+      curSheet = f.sheet;
+      card = null;
+    }
+    if (!card || f.section !== curSection) {
+      card = h('section', { class: 'card' });
+      if (f.section) card.append(h('h3', { class: 'card-title' }, f.section));
+      host.append(card);
+      curSection = f.section;
+    }
+    card.append(renderField(f));
+  }
+  for (const f of fields) updatePreview(f);
+}
+
+function renderExtras() {
+  const el = $('#form-extras');
+  const keys = Object.keys(state.extras);
+  el.hidden = !keys.length;
+  el.textContent = '';
+  if (!keys.length) return;
+  el.append(h('p', { class: 'card-title' }, 'JSONで指定された、フォーム外の項目'),
+    h('ul', null, keys.map((k) => h('li', null, `${k} = ${JSON.stringify(state.extras[k])}`))),
+    h('p', { class: 'help' }, 'セル番地のキーはそのセルに書き込みます。見つからないキーは無視されます。変更は「JSON」タブで。'));
+}
+
+function updatePreview(f) {
+  const ctrl = state.ctrls.get(f.id);
+  if (!ctrl || !ctrl.preview) return;
+  const el = ctrl.preview;
+  el.textContent = '';
+  el.classList.remove('error');
+  const v = ctrl.get();
+  if (v === undefined) return;
+  const mark = $('#mark').value;
+  if (f.kind === 'table' || f.kind === 'split' || f.kind === 'digits' || f.kind === 'choice_cells') {
+    try {
+      const cells = M.previewCells(f, v, mark);
+      if (f.kind === 'table') return;
+      el.append('記入内容: ', ...cells.map(([ref, x]) => h('span', { class: 'val', title: ref }, x === null || x === '' ? '（空）' : M.pyStr(x))).flatMap((n, i) => (i ? [' ', n] : [n])));
+    } catch (e) {
+      el.textContent = e.message;
+      el.classList.add('error');
+    }
+    return;
+  }
+  try {
+    const out = M.formatFieldValue(state.wb, f, v, mark);
+    if (out === null) { el.textContent = 'このセルを空にします'; return; }
+    if (typeof out === 'number') { el.append('数値として記入: ', h('span', { class: 'val' }, M.pyStr(out))); return; }
+    if (typeof out === 'boolean') { el.append('論理値として記入: ', h('span', { class: 'val' }, out ? 'TRUE' : 'FALSE')); return; }
+    const s = M.pyStr(out);
+    if (f.kind === 'text' && s === v) return;
+    el.append('記入内容: ', h('span', { class: 'val' }, s));
+  } catch (e) {
+    el.textContent = e.message;
+    el.classList.add('error');
+  }
+}
+
+function collect() {
+  const data = {};
+  for (const f of state.fields) {
+    const ctrl = state.ctrls.get(f.id);
+    if (!ctrl) continue;
+    const v = ctrl.get();
+    if (v !== undefined) data[f.id] = v;
+  }
+  for (const [k, v] of Object.entries(state.extras)) data[k] = v;
+  return data;
+}
+
+function onFieldChange(f) {
+  updatePreview(f);
+  updateStatus();
+  if (!state.jsonDirty && !$('#panel-json').hidden) $('#json').value = JSON.stringify(collect(), null, 2);
+}
+function updateStatus() {
+  const data = collect();
+  const n = state.fields.filter((f) => data[f.id] !== undefined).length;
+  $('#status').textContent = state.fields.length ? `${state.fields.length}項目中 ${n}項目を記入` : '';
+}
+
+/* ---------------- tabs ---------------- */
+const TABS = ['form', 'json', 'md'];
+function selectTab(name) {
+  for (const t of TABS) {
+    $(`#tab-${t}`).setAttribute('aria-selected', String(t === name));
+    $(`#panel-${t}`).hidden = t !== name;
+  }
+  if (name === 'json' && !state.jsonDirty) $('#json').value = JSON.stringify(collect(), null, 2);
+}
+TABS.forEach((t) => $(`#tab-${t}`).addEventListener('click', () => selectTab(t)));
+$('.tabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const cur = TABS.findIndex((t) => $(`#tab-${t}`).getAttribute('aria-selected') === 'true');
+  const next = TABS[(cur + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length];
+  selectTab(next);
+  $(`#tab-${next}`).focus();
+});
+
+/* ---------------- JSON tab ---------------- */
+function setJsonDirty(d) { state.jsonDirty = d; $('#json-dirty').hidden = !d; }
+$('#json').addEventListener('input', () => setJsonDirty(true));
+function jsonMsg(kind, text, list) {
+  const el = $('#json-msg');
+  el.textContent = '';
+  if (!text) return;
+  el.append(h('div', { class: `msg ${kind}` }, text, list && list.length ? h('ul', null, list.map((x) => h('li', null, x))) : null));
+}
+function parseJsonInput(text) {
+  let t = text.trim();
+  const fence = /```(?:json|JSON)?\s*\n([\s\S]*?)```/.exec(t);
+  if (fence) t = fence[1].trim();
+  if (!t) return {};
+  const data = JSON.parse(t);
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error('JSONオブジェクト（{ ... }）を入力してください');
+  return data;
+}
+function applyJson() {
+  let data;
+  try { data = parseJsonInput($('#json').value); }
+  catch (e) { jsonMsg('err', `JSONを読み取れません: ${e.message}`); return false; }
+  for (const ctrl of state.ctrls.values()) ctrl.set(undefined);
+  state.extras = {};
+  const unknown = [];
+  let n = 0;
+  for (const [k, v] of Object.entries(data)) {
+    const f = M.resolve(state.fields, k);
+    if (f) { state.ctrls.get(f.id).set(v); n++; }
+    else {
+      state.extras[k] = v;
+      if (!/^(?:[^!]+!)?\$?[A-Za-z]{1,3}\$?\d+$/.test(k)) unknown.push(k);
+    }
+  }
+  for (const f of state.fields) updatePreview(f);
+  renderExtras();
+  updateStatus();
+  setJsonDirty(false);
+  $('#json').value = JSON.stringify(collect(), null, 2);
+  jsonMsg(unknown.length ? 'warn' : 'ok', `フォームに反映しました（${n}項目）。`,
+    unknown.length ? unknown.map((k) => `フォームに見つからないキー: ${k}`) : null);
+  return true;
+}
+$('#json-apply').addEventListener('click', applyJson);
+$('#json-reload').addEventListener('click', () => { setJsonDirty(false); $('#json').value = JSON.stringify(collect(), null, 2); jsonMsg(); });
+$('#json-template').addEventListener('click', () => {
+  $('#json').value = JSON.stringify(M.templateFor(state.fields), null, 2);
+  setJsonDirty(true);
+  jsonMsg('ok', '雛形を挿入しました。値を書き換えて「フォームに反映」を押してください。');
+});
+
+/* ---------------- copy ---------------- */
+async function copyText(text, btn) {
+  let ok = false;
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); ok = true; } } catch (e) { ok = false; }
+  if (!ok) {
+    const ta = h('textarea', { style: 'position:fixed;top:-1000px;opacity:0' });
+    ta.value = text;
+    document.body.append(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+  }
+  if (btn) {
+    const old = btn.textContent;
+    btn.textContent = ok ? 'コピーしました' : 'コピーできませんでした';
+    setTimeout(() => { btn.textContent = old; }, 1600);
+  }
+}
+$('#json-copy').addEventListener('click', (e) => copyText($('#json').value, e.currentTarget));
+$('#md-copy').addEventListener('click', (e) => copyText($('#md').textContent, e.currentTarget));
+$('#md-copy-prompt').addEventListener('click', (e) => {
+  const tpl = JSON.stringify(M.templateFor(state.fields), null, 2);
+  const prompt = [
+    '次のExcel申請書（方眼紙形式）に記入する値を考えてください。',
+    '回答は、下の「JSON雛形」と同じキーを持つJSONだけにしてください。',
+    '- 日付は YYYY-MM-DD 形式',
+    '- 選択欄は選択肢の文字列（複数選ぶ場合は配列）',
+    '- 表は行ごとのオブジェクトの配列',
+    '- わからない項目はキーごと省略',
+    '',
+    $('#md').textContent.trim(),
+    '',
+    '## JSON雛形',
+    '```json',
+    tpl,
+    '```',
+    '',
+  ].join('\n');
+  copyText(prompt, e.currentTarget);
+});
+
+/* ---------------- download ---------------- */
+function outName() {
+  const m = /^(.*?)(\.xlsm)?(\.xlsx)?$/i.exec(state.fileName);
+  const base = (m && m[1]) || 'form';
+  return `${base}_記入済${m && m[2] ? '.xlsm' : '.xlsx'}`;
+}
+function renderReport(rep, name) {
+  const el = $('#report');
+  el.textContent = '';
+  const kind = rep.errors.length ? 'err' : rep.unknown_keys.length ? 'warn' : 'ok';
+  const box = h('div', { class: `msg ${kind}` });
+  if (rep.errors.length) {
+    box.append(h('strong', null, 'ダウンロードできませんでした。'), h('ul', null, rep.errors.map((x) => h('li', null, x))));
+  } else {
+    box.append(h('strong', null, `${name} を作成しました。`), ` ${rep.written.length}セルに書き込み`,
+      rep.verified ? '、保存後に読み戻して一致を確認しました。' : '。');
+  }
+  if (rep.unknown_keys.length) box.append(h('div', null, 'フォームに見つからず無視したキー:'), h('ul', null, rep.unknown_keys.map((x) => h('li', null, x))));
+  if (rep.unfilled.length && !rep.errors.length) {
+    box.append(h('details', null, h('summary', null, `未記入の欄（${rep.unfilled.length}）`), h('ul', null, rep.unfilled.map((x) => h('li', null, x)))));
+  }
+  el.append(box);
+}
+function triggerDownload(bytes, name, mime) {
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: name, style: 'display:none' });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+$('#download').addEventListener('click', async () => {
+  if (!state.wb || state.busy) return;
+  if (state.jsonDirty && !applyJson()) { selectTab('json'); return; }
+  const data = collect();
+  const btn = $('#download');
+  if (!Object.keys(data).length) {
+    renderReport({ errors: ['記入する値がありません。フォームに入力してください。'], unknown_keys: [], unfilled: [], written: [] });
+    return;
+  }
+  state.busy = true;
+  btn.disabled = true;
+  try {
+    const { report, bytes } = await M.fill(state.wb, data, { mark: $('#mark').value });
+    const name = outName();
+    renderReport(report, name);
+    if (!report.errors.length && bytes) {
+      const mime = name.endsWith('.xlsm') ? 'application/vnd.ms-excel.sheet.macroEnabled.12' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      triggerDownload(bytes, name, mime);
+    }
+    $('#report').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    console.error(e);
+    renderReport({ errors: [e.message || String(e)], unknown_keys: [], unfilled: [], written: [] });
+  } finally {
+    state.busy = false;
+    btn.disabled = false;
+  }
+});
+$('#mark').addEventListener('change', () => { for (const f of state.fields) updatePreview(f); });
+
+/* ---------------- app ---------------- */
+function renderApp() {
+  const wb = state.wb;
+  $('#fname').textContent = state.fileName;
+  const visible = wb.sheets.filter((s) => !s.hidden);
+  const used = new Set(state.fields.map((f) => f.sheet));
+  $('#fmeta').textContent = `シート ${visible.length}枚` + (used.size ? `（入力欄のあるシート: ${[...used].join('、')}）` : '') + ` · 入力欄 ${state.fields.length}個`;
+  renderForm();
+  renderExtras();
+  $('#md').textContent = M.workbookToMarkdown(wb);
+  $('#json').value = '';
+  setJsonDirty(false);
+  jsonMsg();
+  $('#report').textContent = '';
+  $('#start').hidden = true;
+  $('#app').hidden = false;
+  $('#actionbar').hidden = false;
+  selectTab('form');
+  updateStatus();
+  window.scrollTo(0, 0);
+}
+})();
+</script>
+</body>
+</html>
