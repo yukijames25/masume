@@ -11,6 +11,11 @@ KIND_JA = {
     "choice": "選択",
     "inline_text": "テキスト(セル内)",
     "table": "表",
+    "circle": "選択(○で囲む)",
+    "choice_cells": "選択(□別セル)",
+    "pattern": "書式入り(〒・電話・時刻)",
+    "split": "分割欄",
+    "digits": "1文字1マス",
 }
 
 
@@ -30,8 +35,14 @@ def sheet_to_markdown(wb: Workbook, sheet_name: str | None = None, layout: bool 
             extra = "選択肢: " + " / ".join(f.options)
         elif f.columns:
             extra = "列: " + " / ".join(c["id"] for c in f.columns) + f"（最大{len(f.rows)}行）"
+        elif f.parts:
+            extra = "マス: " + " ".join(p["cell"] + (p.get("suffix") or "") for p in f.parts)
         elif f.template:
             extra = "書式: " + f.template.replace("\n", " ")
+        if f.suffix:
+            extra = (extra + f" 単位: {f.suffix}").strip()
+        if f.value not in (None, ""):
+            extra = (extra + f" 現在値: {f.value}").strip()
         if f.section:
             extra = (f"[{f.section}] " + extra).strip()
         lines.append(f"| {_cell_md(f.id)} | {KIND_JA.get(f.kind, f.kind)} | {f.range} | {_cell_md(extra)} |")
