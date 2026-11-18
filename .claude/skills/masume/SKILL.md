@@ -1,6 +1,6 @@
 ---
 name: masume
-description: Read or fill a Japanese Excel form (Excel 方眼紙 / 神エクセル / 申請書 / 届出 / 精算書 .xlsx) without breaking its layout. Use when the user asks to fill in, 記入, 入力, 転記 into, or summarize an .xlsx form whose layout uses merged cells, □ checkboxes or 令和　年　月　日 placeholders.
+description: Read or fill a Japanese Excel form (Excel 方眼紙 / 神エクセル / 申請書 / 届出 / 精算書 / 履歴書 .xlsx) without breaking its layout. Use when the user asks to fill in, 記入, 入力, 転記 into, or summarize an .xlsx form whose layout uses merged cells, □ checkboxes or 令和　年　月　日 placeholders.
 ---
 
 # masume — Excel 方眼紙フォームの読み書き
@@ -14,39 +14,61 @@ description: Read or fill a Japanese Excel form (Excel 方眼紙 / 神エクセ�
 
 ## 手順
 
-1. **構造を読む**（まずこれ。生のセルを読まない）
+1. **構造を読む**（生のセルは読まない）
    ```
    python -m masume md <form.xlsx>
+   python -m masume inspect <form.xlsx> --json > fields.json   # 記入前に必ず保存（手順5で使う）
    ```
-   入力欄一覧（id・種類・セル範囲・選択肢・表の列）と論理レイアウトが出る。
-   機械可読にしたいときは `python -m masume inspect <form.xlsx> --json`。
+   `md` は入力欄の一覧（id・種類・セル範囲・選択肢・表の列・マス）と、論理レイアウトを出す。
 
 2. **雛形を作る**
    ```
    python -m masume template <form.xlsx> > values.json
    ```
+   値はすべて `null`（表は `[]`）。**null の欄は書き込まれない。** ユーザーから聞いた事実だけを埋め、推測で埋めない。選択欄も勝手に選ばない。
 
-3. **値を埋める**（ユーザー提供の情報だけを使う。不明な欄は空のまま残し、最後にユーザーへ確認する）
-   - 日付は `YYYY-MM-DD` で書く。フォームが和暦なら自動で「令和8年11月19日」になる。
-   - 選択欄（□）は選択肢名を文字列か配列で。
-   - 表は列idをキーにした行オブジェクトの配列。行数上限は inspect の `max_rows`。
-   - 検出されなかった欄は `"C12"` や `"シート名!C12"` のセル番地をキーにして直接書ける。
+3. **値を埋める**（書き方は下の表）
 
 4. **書き込む**
    ```
    python -m masume fill <form.xlsx> values.json -o <form>_記入済.xlsx
    ```
-   出力 JSON の `errors` / `unknown_keys` が空であることを確認し、`unfilled` に残った欄をユーザーに伝える。
+   結果の `ok` と `saved` が true であることを確認する。`errors` があればファイルは作られない（`planned` は書く予定だった内容）。
+   `warnings` と、`unfilled`（空のまま残った欄）はユーザーに伝える。
 
-   検出が外れた様式は `inspect --json > fields.json` を手で直して `fill --fields fields.json` で使い回せる。
+5. **検証**（記入前に保存した fields.json を使う。使わないと、記入した値がラベルに見えて id が変わる）
+   ```
+   python -m masume md <form>_記入済.xlsx --fields fields.json
+   ```
+   `現在値` に、伝えられた事実がすべて正しい欄に入っているかを確認して報告する。
 
-5. **検証**: `python -m masume md <form>_記入済.xlsx` で記入結果を読み直して報告する。
+## 値の書き方
+
+| 欄の種類（md の表示） | 渡し方 | 結果の例 |
+|---|---|---|
+| テキスト | 文字列。数だけの文字列は数値として保存される（先頭0付きは文字列のまま） | `52000` |
+| 日付 / 日付(セル内) | `"2026-11-19"`、`"昭和60年6月15日"`、`"S60.6.15"` | 和暦の様式なら `令和8年11月19日`。（満　歳）は記入日（なければ今日）から自動計算 |
+| 期間（～ が2つある日付欄） | `["2026-12-01", "2026-12-03"]` または `"2026-12-01～2026-12-03"` | （　日間）も自動で入る。1つだけ渡すと warning |
+| 選択（□ が1セル内） | `"普通"`、`["A","B"]`、`"その他（祖父）"`、`{"その他": "祖父"}` | `■普通　□当座` |
+| 選択(□別セル) | `"女性"` | 選んだ□だけ■ |
+| 選択(○で囲む)「男 ・ 女」 | `"女"` | `男 ・ （女）` |
+| 書式入り（〒・電話・時刻） | 区切り付きの文字列 `"100-0001"`、`"03-1234-5678"`、`"9:30"`（またはリスト） | `〒100－0001`、`（03）1234－5678`、`9時30分` |
+| 分割欄 | `"5年3ヶ月"`、`[5, 3]`、`{"年": 5, "ヶ月": 3}`、`"090-1234-5678"`、郵便番号 `"1000001"` | 各マスに数値 |
+| 1文字1マス | `"1234567"`（ハイフンや空白は除去） | 1マス1文字 |
+| 表 | `[{"年": 2009, "月": 4, "学歴・職歴": "〇〇大学 入学"}, ...]`（列 id はmdの「列」） | 空文字の列は書かない |
+| 検出されなかった欄 | `"C12"` や `"シート名!C12"` をキーにする | |
+
+### 気をつける欄
+
+- 「〒」の付いた欄は `〇〇(〒)` という id になる。住所の本文はその下の `〇〇` に入れる（例: `現住所(〒)` と `現住所`）。
+- 「銀行・信用金庫　　支店」のように、様式に印字済みの語がある欄では、その語を重ねない（金融機関名は「みずほ」と書き、「みずほ銀行」とは書かない）。
+- 年・月・金額・人数は数値で渡す。
 
 ## 注意
 
-- `.xls`（旧形式）は非対応。Excel で .xlsx に保存し直してもらう。
-- 数式セルには書き込まない（ツールが拒否する）。合計欄などは Excel が開いたとき再計算する。
-- 個人情報を扱うので、ユーザーが求めない外部送信はしない。
+- `.xls`（旧形式）は `python -m masume convert old.xls` で .xlsx にしてから使う（Excel か LibreOffice が必要）。
+- 数式セル・Excelテーブルの見出し・配列数式の範囲・結合セルの左上以外には書けない（ツールが拒否する）。合計欄などは、Excel が開いたときに再計算する。
+- 個人情報を扱うので、ユーザーが求めていない外部送信はしない。
 
-MCP として使う場合は同梱の `.mcp.json`（`python -m masume.mcp_server`）を有効化すると
+MCP として使う場合は同梱の `.mcp.json`（`python -m masume.mcp_server`）を有効にすると、
 `inspect_form` / `form_to_markdown` / `fill_form` / `list_sheets` ツールが使える。

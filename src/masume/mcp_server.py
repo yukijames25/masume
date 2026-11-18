@@ -57,6 +57,11 @@ TOOLS = [
                 "path": {"type": "string"},
                 "sheet": {"type": "string"},
                 "layout": {"type": "boolean", "default": True},
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "inspect_form's 'fields' saved BEFORE filling: keeps ids stable and shows current values (use this to verify a filled form)",
+                },
             },
             "required": ["path"],
         },
@@ -114,9 +119,14 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "form_to_markdown":
         wb = ooxml.load(path)
         layout = bool(args.get("layout", True))
+        fields = None
+        if isinstance(args.get("fields"), list):
+            from .detect import Field
+
+            fields = [Field.from_dict(d) for d in args["fields"]]
         if args.get("sheet"):
-            return _text(sheet_to_markdown(wb, args["sheet"], layout))
-        return _text(workbook_to_markdown(wb, layout))
+            return _text(sheet_to_markdown(wb, args["sheet"], layout, fields))
+        return _text(workbook_to_markdown(wb, layout, fields))
     if name == "fill_form":
         values = args.get("values")
         if not isinstance(values, dict):
