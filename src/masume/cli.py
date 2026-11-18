@@ -3,7 +3,8 @@
     masume inspect  form.xlsx [--sheet S] [--json]
     masume template form.xlsx [--sheet S]          # JSON skeleton to fill in
     masume md       form.xlsx [--sheet S] [--no-layout]
-    masume fill     form.xlsx data.json -o out.xlsx [--sheet S] [--mark ■]
+    masume fill     form.xlsx data.json -o out.xlsx [--sheet S] [--mark ■] [--fields f.json]
+    masume convert  old.xls [-o new.xlsx]
 """
 from __future__ import annotations
 
@@ -65,9 +66,23 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--sheet")
     p.add_argument("--mark", default="■", help="チェックボックスの塗り記号（既定: ■）")
     p.add_argument("--strict", action="store_true", help="未知のキーがあれば失敗")
+    p.add_argument("--fields", help="inspect --json の出力（手で修正したもの）を検出結果の代わりに使う")
+
+    p = sub.add_parser("convert", help="旧形式 .xls を .xlsx に変換（Excel または LibreOffice を使用）")
+    p.add_argument("xls")
+    p.add_argument("-o", "--output")
 
     a = ap.parse_args(argv)
     try:
+        if a.cmd == "convert":
+            from .convert import ConvertError, xls_to_xlsx
+
+            try:
+                print(xls_to_xlsx(a.xls, a.output))
+            except ConvertError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 2
+            return 0
         if a.cmd in ("inspect", "template"):
             wb = ooxml.load(a.xlsx)
             fields = detect(wb, a.sheet)
@@ -94,7 +109,15 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "fill":
             raw = sys.stdin.read() if a.data == "-" else open(a.data, encoding="utf-8-sig").read()
             data = json.loads(raw)
-            rep = fill(a.xlsx, a.output, data, sheet=a.sheet, mark=a.mark, strict=a.strict)
+            fields = None
+            if a.fields:
+                from .detect import Field
+
+                raw_f = json.load(open(a.fields, encoding="utf-8-sig"))
+                if isinstance(raw_f, dict):
+                    raw_f = raw_f.get("fields", [])
+                fields = [Field.from_dict(d) for d in raw_f]
+            rep = fill(a.xlsx, a.output, data, sheet=a.sheet, mark=a.mark, strict=a.strict, fields=fields)
             print(json.dumps(rep.to_dict(), ensure_ascii=False, indent=2))
             return 0 if not rep.errors else 1
     except (OSError, KeyError, ValueError) as e:

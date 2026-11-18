@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "masume": {
+      "command": "python",
+      "args": ["-m", "masume.mcp_server"],
+      "env": { "PYTHONPATH": "src" }
+    }
+  }
+}

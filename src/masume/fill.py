@@ -123,9 +123,13 @@ def fill(
     sheet: str | None = None,
     mark: str = "■",
     strict: bool = False,
+    fields: list[Field] | None = None,
 ) -> FillReport:
+    """Fill *src* into *dst*. Pass *fields* (e.g. a corrected, saved field
+    definition list) to skip automatic detection."""
     wb = ooxml.load(src)
-    fields = detect(wb, sheet)
+    if fields is None:
+        fields = detect(wb, sheet)
     report = FillReport()
     updates: dict[str, dict[tuple[int, int], object]] = {}
     sheet_path = {s.name: s.path for s in wb.sheets}

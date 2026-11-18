@@ -82,6 +82,19 @@ class Field:
     template: str | None = None  # original cell text for inline kinds
     value: object = None  # current value (only meaningful for filled forms)
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "Field":
+        rows = d.get("rows") or []
+        if not rows and d.get("kind") == "table" and d.get("max_rows"):
+            start = int(re.sub(r"\D", "", d["cell"]))
+            rows = list(range(start, start + int(d["max_rows"])))
+        return cls(
+            id=d["id"], label=d.get("label", d["id"]), sheet=d["sheet"], cell=d["cell"],
+            range=d.get("range", d["cell"]), kind=d.get("kind", "text"), section=d.get("section"),
+            options=list(d.get("options") or []), columns=list(d.get("columns") or []),
+            rows=list(rows), template=d.get("template"),
+        )
+
     def to_dict(self) -> dict:
         d = {
             "id": self.id,
@@ -98,6 +111,7 @@ class Field:
         if self.columns:
             d["columns"] = self.columns
             d["max_rows"] = len(self.rows)
+            d["rows"] = self.rows
         if self.template is not None:
             d["template"] = self.template
         return d

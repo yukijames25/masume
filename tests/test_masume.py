@@ -21,6 +21,7 @@ FX = os.path.join(HERE, "fixtures")
 KYUKA = os.path.join(FX, "kyuka_todoke.xlsx")
 KEIHI = os.path.join(FX, "keihi_seisan.xlsx")
 PLAIN = os.path.join(FX, "plain_colon.xlsx")
+EXCEL_SAVED = os.path.join(FX, "excel_saved_kyuka.xlsx")  # same form, re-saved by real Excel (sharedStrings, x14ac, mc:Ignorable)
 
 
 def fields_of(path):
@@ -64,6 +65,11 @@ class DetectTests(unittest.TestCase):
         self.assertEqual({k: v.cell for k, v in f.items()},
                          {"氏名": "B3", "メール": "B4", "生年月日": "B5", "電話番号": "B6"})
         self.assertEqual(f["生年月日"].kind, "date")
+
+    def test_excel_saved_file_same_fields(self):
+        a = {k: (v.cell, v.kind) for k, v in fields_of(KYUKA).items()}
+        b = {k: (v.cell, v.kind) for k, v in fields_of(EXCEL_SAVED).items()}
+        self.assertEqual(a, b)
 
     def test_markdown(self):
         md = sheet_to_markdown(load(KEIHI))
@@ -163,6 +169,16 @@ class FillTests(unittest.TestCase):
         # styles of written cells are kept (border style index unchanged)
         self.assertEqual(s.cells[(9, 8)].style, load(src).sheet().cells[(9, 8)].style)
 
+    def test_excel_saved_fill_keeps_namespaces(self):
+        out = os.path.join(self.tmp, "x.xlsx")
+        rep = fill(EXCEL_SAVED, out, {"氏名": "山田", "日付": "2026-11-19"})
+        self.assertTrue(rep.to_dict()["ok"], rep.to_dict())
+        with zipfile.ZipFile(EXCEL_SAVED) as a, zipfile.ZipFile(out) as b:
+            head_a = a.read("xl/worksheets/sheet1.xml")[:800]
+            head_b = b.read("xl/worksheets/sheet1.xml")[:800]
+            self.assertEqual(head_a.split(b"<sheetData")[0], head_b.split(b"<sheetData")[0])
+        self.assertEqual(load(out).sheet().value(9, 8), "山田")
+
     def test_table_and_errors(self):
         out = os.path.join(self.tmp, "o.xlsx")
         rep = fill(KEIHI, out, {
@@ -199,6 +215,27 @@ class FillTests(unittest.TestCase):
             self.skipTest("openpyxl not installed")
         ws = openpyxl.load_workbook(out).active
         self.assertEqual(ws["B3"].value, "鈴木")
+
+
+class FieldsFileTests(unittest.TestCase):
+    def test_saved_fields_override_detection(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            fs = [f.to_dict() for f in detect(load(KEIHI))]
+            # simulate a manual correction: rename a field id and point it elsewhere
+            for d in fs:
+                if d["id"] == "部署名":
+                    d["id"] = "所属部署"
+            from masume.detect import Field
+            fields = [Field.from_dict(json.loads(json.dumps(d))) for d in fs]
+            out = os.path.join(tmp, "o.xlsx")
+            rep = fill(KEIHI, out, {"所属部署": "総務", "明細": [{"内容": "切手", "金額": 84}]}, fields=fields)
+            self.assertTrue(rep.to_dict()["ok"], rep.to_dict())
+            s = load(out).sheet()
+            self.assertEqual(s.value(6, 8), "総務")
+            self.assertEqual(s.value(10, 25), 84)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class McpTests(unittest.TestCase):
