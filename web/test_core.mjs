@@ -119,7 +119,16 @@ console.log('1. formatter unit checks (mirrors tests/test_masume.py, tests/test_
   eq(M.formatDate('2026-11-19', '提出日：令和　年　月　日', true), '提出日：令和8年11月19日', 'pre text');
   eq(M.formatDate('未定', null, true), '未定', 'non-date');
   eq(M.formatDate('1990-04-02', '昭和・平成　　年　　月　　日生（満　　歳）', true, TODAY), '平成2年4月2日生（満36歳）', 'era list + age');
-  eq(M.formatDate('1985-06-15', '明・大・昭・平・令　　年　　月　　日', true), '昭60年6月15日', 'era abbr');
+  eq(M.formatDate('1985-06-15', '明・大・昭・平・令　　年　　月　　日', true), '昭和60年6月15日', 'era list prints the full era name');
+  for (const [inp, want] of [['昭和60年6月15日', [1985, 6, 15]], ['S60.6.15', [1985, 6, 15]], ['平成元年1月8日', [1989, 1, 8]],
+    ['R8/11/19', [2026, 11, 19]], ['２０２６／１１／１９', [2026, 11, 19]], ['来週', null]]) {
+    const d = M.parseDate(inp);
+    eq(d && [d.y, d.m, d.d], want, `parseDate(${inp})`);
+  }
+  let bad = false;
+  try { M.formatDate('来週', '令和　年　月　日', true); } catch (e) { bad = e instanceof M.FillError; }
+  check(bad, 'unparseable date into a placeholder raises FillError');
+  eq(M.formatPattern('　　時　　分', '09:30'), '9時30分', 'hour without leading zero');
   eq(M.formatChoice('□有　□無', '無'), '□有　■無', 'choice');
   eq(M.formatChoice('■有　□無', ['無'], '☑'), '□有　☑無', 'choice mark');
   eq(M.formatChoice('□本人　□同一世帯の方　□その他（　　）', { その他: '祖父' }), '□本人　□同一世帯の方　■その他（祖父）', 'choice extra');
@@ -145,7 +154,7 @@ console.log('1. formatter unit checks (mirrors tests/test_masume.py, tests/test_
 
 // ============================================================================
 console.log('2. detection parity with `python -m masume inspect --json` (+ md, template)');
-const fixtureDirs = ['tests/fixtures', 'tests/fixtures_hard'];
+const fixtureDirs = ['tests/fixtures', 'tests/fixtures_hard', 'tests/fixtures_review'];
 const fixtures = fixtureDirs.flatMap((d) => readdirSync(path.join(ROOT, d)).filter((f) => f.endsWith('.xlsx')).map((f) => path.join(ROOT, d, f)));
 for (const file of fixtures) {
   const rel = path.relative(ROOT, file).replace(/\\/g, '/');
@@ -177,12 +186,12 @@ const fillCases = [
     expect: { 'Sheet1!B3': '鈴木', 'Sheet1!D10': 'extra', 'Sheet1!B5': '2000年1月2日' } },
   // tests/test_hard.py
   { src: 'tests/fixtures_hard/rirekisho.xlsx', data: {
-    記入日: '2026-11-19', '氏名(ふりがな)': 'やまだ たろう', 氏名: '山田 太郎', 生年月日: '1990-04-02', 性別: '男', 現住所: '123-4567',
-    '現住所(2)': '東京都千代田区1-1', '学歴・職歴': [{ 年: 2009, 月: 4, '学歴・職歴': '〇〇大学 入学' }] },
+    記入日: '2026-11-19', '氏名(ふりがな)': 'やまだ たろう', 氏名: '山田 太郎', 生年月日: '1990-04-02', 性別: '男', '現住所(〒)': '123-4567',
+    現住所: '東京都千代田区1-1', '学歴・職歴': [{ 年: 2009, 月: 4, '学歴・職歴': '〇〇大学 入学' }] },
     expect: { '履歴書!Q3': '令和8年11月19日現在', '履歴書!F7': '平成2年4月2日生（満36歳）', '履歴書!W7': '（男） ・ 女', '履歴書!F9': '〒123－4567', '履歴書!G14': '〇〇大学 入学' } },
   { src: 'tests/fixtures_hard/juminhyo.xlsx', data: {
     '請求者/生年月日': '1985-06-15', '必要な方/生年月日': '2020-01-10', 請求者との関係: { その他: '祖父' }, 使用目的: 'その他（パスポート申請）', 必要通数: 2 },
-    expect: { '請求書!W11': '昭60年6月15日', '請求書!I15': '令和2年1月10日', '請求書!I16': '□本人　□同一世帯の方　■その他（祖父）', '請求書!I19': '□就職　□年金　□保険　■その他（パスポート申請）' } },
+    expect: { '請求書!W11': '昭和60年6月15日', '請求書!I15': '令和2年1月10日', '請求書!I16': '□本人　□同一世帯の方　■その他（祖父）', '請求書!I19': '□就職　□年金　□保険　■その他（パスポート申請）' } },
   { src: 'tests/fixtures_hard/shinsei_kikan.xlsx', data: {
     申請日: '2026-11-19', 電話番号: '03-1234-5678', 出張期間: '2026-12-01～2026-12-03', 出発時刻: '9:30', 帰着時刻: [18, '05'],
     口座番号: '1234567', 支店: '渋谷', 口座種別: '普通', 概算金額: 52000 },
@@ -195,6 +204,32 @@ const fillCases = [
     expect: { '申込書!H8': 5, '申込書!K8': 3, '申込書!H9': '090', '申込書!M9': 1234, '申込書!R9': 5678, '申込書!H10': '□', '申込書!L10': '■' } },
   { src: 'tests/fixtures_hard/kintou.xlsx', data: { 氏名: '佐藤 花子' }, expect: { '申込書!H6': '佐藤 花子' } },
   { src: 'tests/fixtures_hard/underline.xlsx', data: { 住所: '東京都', 氏名: '山田' } },
+  // tests/test_hard.py DogfoodRegressionTests
+  { src: 'tests/fixtures_hard/shinsei_kikan.xlsx', data: { 申請日: 'YYYY-MM-DD', 所属: '', 氏名: null, 学歴: [] }, noWrites: true },
+  { src: 'tests/fixtures_hard/shinsei_kikan.xlsx', data: { 申請日: '来週' }, errors: true },
+  { src: 'tests/fixtures_hard/shinsei_kikan.xlsx', data: { 出張期間: '2026-12-01/2026-12-03', 出発時刻: '09:30', 概算金額: '52000' },
+    expect: { '申請書!H8': '令和8年12月1日　～　令和8年12月3日（3日間）', '申請書!H9': '9時30分', '申請書!H11': 52000 } },
+  { src: 'tests/fixtures_hard/shinsei_kikan.xlsx', data: { 出張期間: '2026-12-01' }, warnings: true },
+  { src: 'tests/fixtures_hard/rirekisho.xlsx', data: { 現住所: '東京都千代田区1-1', 性別: '女', '学歴・職歴': [{ 年: '2009', 月: '4', '学歴・職歴': '入学' }] },
+    expect: { '履歴書!B14': 2009 }, readback: ['| 現住所 | テキスト | F10:Y10 | [履歴書] 現在値: 東京都千代田区1-1 |', '1行記入済み', '現在値: 男 ・ （女）'] },
+  // tests/test_safety.py (fixtures_review: files saved by real Excel)
+  { src: 'tests/fixtures_review/base.xlsx', data: { A11: 'x', A12: 'y', A14: 'z' }, expect: { 'Sheet1!A11': 'x', 'Sheet1!A12': 'y', 'Sheet1!A14': 'z' } },
+  { src: 'tests/fixtures_review/empty.xlsx', data: { A1: 'a', B3: 'b', C2: 'c' }, expect: { 'Sheet1!A1': 'a', 'Sheet1!B3': 'b', 'Sheet1!C2': 'c' } },
+  { src: 'tests/fixtures_review/base.xlsx', data: { A0: 'x' }, errors: true },
+  { src: 'tests/fixtures_review/base.xlsx', data: { A1048577: 'x' }, errors: true },
+  { src: 'tests/fixtures_review/base.xlsx', data: { XFE1: 'x' }, errors: true },
+  { src: 'tests/fixtures_review/base.xlsx', data: { B1: 'x'.repeat(32768) }, errors: true },
+  { src: 'tests/fixtures_review/base.xlsx', data: { B1: 'a￾b￿c\ud800d' }, expect: { 'Sheet1!B1': 'abcd' } },
+  { src: 'tests/fixtures_review/table.xlsx', data: { A1: '氏名' }, errors: true },
+  { src: 'tests/fixtures_review/table.xlsx', data: { A3: 'x', A4: 'y' }, expect: { 'Sheet1!A3': 'x', 'Sheet1!A4': 'y' } },
+  { src: 'tests/fixtures_review/norowrefs.xlsx', data: { A3: 'x' }, errors: true },
+  { src: 'tests/fixtures_review/colstyle.xlsx', data: { C5: 'x', E7: 'y' }, expect: { 'Sheet1!C5': 'x', 'Sheet1!E7': 'y' } },
+  { src: 'tests/fixtures_review/base.xlsx', data: { B1: 'ID_x0031_23' }, expect: { 'Sheet1!B1': 'ID_x0031_23' } },
+  { src: 'tests/fixtures_review/formulas.xlsx', data: { D2: 999 }, errors: true },
+  { src: 'tests/fixtures_review/spill.xlsx', data: { A2: 99 }, errors: true },
+  { src: 'tests/fixtures/kyuka_todoke.xlsx', data: { I9: 'x' }, errors: true },
+  { src: 'tests/fixtures_review/base.xlsx', data: { TEL1: '03-1234-5678' } },
+  { src: 'tests/fixtures_review/prefixed.xlsx', data: { B2: 'x', C9: 1 }, expect: { 'Sheet1!B2': 'x', 'Sheet1!C9': 1 } },
   { src: 'tests/fixtures_hard/ringi.xlsx', data: { 部長: '済', 件名: 'PC購入', 金額: '1,200', 添付書類: ['見積書', 'カタログ'] } },
 ];
 // plus one auto-generated case per fixture from its template
@@ -235,6 +270,9 @@ async function runFillCases(cases, tag) {
     const a = normReport(j.res.report), b = normReport(p.report);
     if (!check(same(a, b), `${name}: report differs — ${diffLine(a, b)}`)) console.log('    js errors:', j.res.report.errors, '\n    py errors:', p.report.errors);
     if (j.c.errors !== undefined) check(!!b.errors.length === j.c.errors, `${name}: expected errors=${j.c.errors}`);
+    if (j.c.errors) check(!existsSync(j.jsOut) && !existsSync(j.pyOut), `${name}: no file may be written when refusing`);
+    if (j.c.warnings) check(b.warnings.length > 0, `${name}: expected warnings`);
+    if (j.c.noWrites) check(b.ok && same(b.written, []), `${name}: expected nothing written`);
     if (!b.errors.length && existsSync(j.jsOut) && existsSync(j.pyOut)) cmp.push({ name, a: j.pyOut, b: j.jsOut, jsOut: j.jsOut, c: j.c });
   });
   if (cmp.length) {
@@ -254,6 +292,27 @@ for (const x of done) {
   const got = JSON.parse(py(['-c', script, x.jsOut, JSON.stringify(cells)]));
   const want = cells.map((c) => x.c.expect[c]);
   check(same(got, want), `${x.name}: Python loader read ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+}
+// readback: `python -m masume md --fields` vs JS workbookToMarkdown(wb, layout, savedFields)
+for (const x of done) {
+  if (!x.c.readback) continue;
+  const fieldsJson = path.join(TMP, 'fields.json');
+  writeFileSync(fieldsJson, py(['-m', 'masume', 'inspect', '--json', FX(x.c.src)]));
+  for (const layout of [false, true]) {
+    const pyMd = py(['-m', 'masume', 'md', '--fields', fieldsJson, ...(layout ? [] : ['--no-layout']), x.jsOut]);
+    const saved = JSON.parse(readFileSync(fieldsJson, 'utf8')).map((d) => M.Field.fromDict(d));
+    const jsMd = M.workbookToMarkdown(await M.load(readFileSync(x.jsOut)), layout, saved) + '\n';
+    check(jsMd === pyMd, `${x.name}: md --fields (layout=${layout}) differs — ${diffLine(jsMd.split('\n'), pyMd.split('\n'))}`);
+    for (const needle of x.c.readback) check(jsMd.includes(needle), `${x.name}: readback lacks ${needle}`);
+  }
+}
+// values JSON cannot carry: checked on the JS side only
+{
+  const base = await M.load(readFileSync(FX('tests/fixtures_review/base.xlsx')));
+  for (const v of [NaN, Infinity, -Infinity]) {
+    const { report, bytes } = await M.fill(base, { B1: v });
+    check(report.errors.some((e) => e.includes('cannot store')) && bytes === null, `B1=${v} must be refused`);
+  }
 }
 console.log(`  ${fillCases.length} fill cases, ${done.length} outputs byte-compared with Python's`);
 

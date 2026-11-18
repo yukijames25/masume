@@ -1782,6 +1782,18 @@ function detectSheet(sheet, styles) {
     }
   }
 
+  // ---- 6b. 〒 box + address row under one label: 「現住所(〒)」「現住所」
+  const byLabel = new Map();
+  for (const f of fields) byLabel.set(f.label, f);
+  for (const f of fields) {
+    if (f.kind === 'pattern' && pyLstrip(f.template || '', ' 　').startsWith('〒')) {
+      const second = byLabel.get(`${f.label}(2)`);
+      const base = f.label;
+      f.id_hint = `${normalizeLabel(base)}(〒)`;
+      if (second !== undefined) second.label = base;
+    }
+  }
+
   // ---- 7. sections, ids
   const heads = headings(g, regions, usedLabels, claimed);
   const groups = groupLabels(g, regions, usedLabels, claimed);
@@ -2028,14 +2040,28 @@ function detect(wb, sheet = null) {
 const ERAS = [['令和', 2019, 5, 1], ['平成', 1989, 1, 8], ['昭和', 1926, 12, 25], ['大正', 1912, 7, 30], ['明治', 1868, 1, 25]];
 const RE_ISO = new RegExp(`^[${WS}]*(\\p{Nd}{4})[-/.年](\\p{Nd}{1,2})[-/.月](\\p{Nd}{1,2})日?[${WS}]*$`, 'u');
 function daysIn(y, m) { return [31, (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]; }
+const ERA_START = Object.fromEntries(ERAS.map(([name, y]) => [name, y]));
+const ERA_ALIAS = { 令: '令和', R: '令和', 平: '平成', H: '平成', 昭: '昭和', S: '昭和', 大: '大正', T: '大正', 明: '明治', M: '明治' };
+// 「昭和60年6月15日」「平成元年4月2日」「S60.6.15」「H2/4/2」「R8.11.19」
+const RE_WAREKI = new RegExp(`^[${WS}]*(令和|平成|昭和|大正|明治|[令平昭大明]|[RHSTMrhstm])[${WS}]*(元|\\p{Nd}{1,2})[${WS}]*[年./\\-][${WS}]*(\\p{Nd}{1,2})[${WS}]*[月./\\-][${WS}]*(\\p{Nd}{1,2})[${WS}]*日?[${WS}]*$`, 'u');
+const Z2H = { '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', '／': '/', '－': '-', '．': '.' };
+function z2h(s) { return s.replace(/[０-９／－．]/g, (ch) => Z2H[ch]); }
+function mkDate(y, m, d) { return y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > daysIn(y, m) ? null : { y, m, d }; }
 /** -> {y, m, d} | null (only strings, like the Python version) */
 function parseDate(value) {
   if (typeof value !== 'string') return null;
-  const mt = RE_ISO.exec(value);
-  if (!mt) return null;
-  const y = Number(asciiDigits(mt[1])), m = Number(asciiDigits(mt[2])), d = Number(asciiDigits(mt[3]));
-  if (y < 1 || m < 1 || m > 12 || d < 1 || d > daysIn(y, m)) return null;
-  return { y, m, d };
+  value = z2h(value);
+  let mt = RE_ISO.exec(value);
+  if (mt) return mkDate(Number(asciiDigits(mt[1])), Number(asciiDigits(mt[2])), Number(asciiDigits(mt[3])));
+  mt = RE_WAREKI.exec(value);
+  if (mt) {
+    const g1 = mt[1];
+    const era = ERA_ALIAS[cpLen(g1) === 1 ? g1.toUpperCase() : g1] ?? g1;
+    if (!(era in ERA_START)) return null;
+    const y = mt[2] === '元' ? 1 : Number(asciiDigits(mt[2]));
+    return mkDate(ERA_START[era] + y - 1, Number(asciiDigits(mt[3])), Number(asciiDigits(mt[4])));
+  }
+  return null;
 }
 function toWareki(dt) {
   const v = dt.y * 10000 + dt.m * 100 + dt.d;
@@ -2049,7 +2075,7 @@ function warekiYearStr(y) { return y === 1 ? '元' : String(y); }
  * ==================================================================== */
 const ERA_ABBR = { 明治: '明', 大正: '大', 昭和: '昭', 平成: '平', 令和: '令' };
 const RE_SPLIT = new RegExp(`[-－ー‐−/／:：.．${WS}　()（）]+`, 'u');
-const RE_RANGE_SEP = new RegExp(`[${WS}]*(?:[～〜~]|[${WS}]/[${WS}]|[${WS}]+to[${WS}]+)[${WS}]*`, 'u');
+const RE_RANGE_SEP = new RegExp(`[${WS}]*(?:[～〜~]|[${WS}]/[${WS}]|[${WS}]+to[${WS}]+|(?<=\\p{Nd})/(?=\\p{Nd}{4}[-/.年]))[${WS}]*`, 'u');
 
 function usesWareki(wb, sheetName) {
   if (!wb._wareki.has(sheetName)) {
@@ -2067,10 +2093,6 @@ function dayNumber(d) { return Date.UTC(d.y, d.m - 1, d.d) / 86400000; }
 function eraText(eraTpl, d, wareki) {
   if (eraTpl === '西暦' || (eraTpl == null && !wareki)) return [eraTpl === '西暦' ? '西暦' : '', null];
   const [name, y] = toWareki(d);
-  if (eraTpl && /[・･、/／]/u.test(eraTpl)) {
-    const items = eraTpl.split(new RegExp(`[・･、/／${WS}　]+`, 'u')).filter((x) => x);
-    if (items.length && items.every((x) => cpLen(x) === 1)) return [ERA_ABBR[name] ?? name, y];
-  }
   return [name, y];
 }
 function dateText(era, y, d) {
@@ -2096,7 +2118,12 @@ function formatDate(value, template, wareki, today = null) {
     values = [value];
   }
   const dates = values.map(parseDate);
-  if (!dates.length || dates.some((d) => d === null)) return pyStr(value);
+  if (!dates.length || dates.some((d) => d === null)) {
+    if (template && placeholderDates(template).length) {
+      throw new FillError(`日付として読めません: ${pyRepr(value)}。'2026-11-19' や '昭和60年6月15日' の形で渡してください（そのまま書き込みたい場合はセル番地をキーにする）`);
+    }
+    return pyStr(value);
+  }
   today = today || todayDate();
   const ms = template ? placeholderDates(template) : [];
   if (!ms.length) {
@@ -2228,6 +2255,7 @@ function formatPattern(template, value) {
     slots = slots.filter((sl) => sl[0] < end).concat([[end, template.length]]);
   }
   const parts = splitValue(value, slots.length);
+  if (template.includes('時') && parts.length && /^0\p{Nd}$/u.test(pyStr(parts[0]))) parts[0] = String(Number(asciiDigits(pyStr(parts[0]))));
   if (parts.length === slots.length) {
     const out = [];
     let pos = 0;
@@ -2240,7 +2268,7 @@ function formatPattern(template, value) {
     if (slots.length !== 1) for (const sl of slots) if (sl[1] - sl[0] > best[1] - best[0]) best = sl;
     return template.slice(0, best[0]) + pyStr(parts[0]) + template.slice(best[1]);
   }
-  throw new FillError(`${pyRepr(value)} を「${template}」（空欄${slots.length}個）に当てはめられません。配列で指定してください`);
+  throw new FillError(`「${template}」の空欄${slots.length}か所に ${pyRepr(value)} を入れられません。区切り付きの文字列（例 '100-0001'）か、${slots.length}要素のリストで渡してください`);
 }
 
 const RE_NUMSTR = /^(?:[1-9]\p{Nd}{0,14}|0)$/u;
@@ -2282,7 +2310,7 @@ function formatFieldValue(wb, f, value, mark = '■', today = null) {
   if (f.kind === 'circle') return formatCircle(f.template || '', f.options, value);
   if (f.kind === 'inline_text') return formatInline(f.template || '', value);
   if (f.kind === 'pattern') return formatPattern(f.template || '', value);
-  return value;
+  return isStr(value) ? num(value) : value;
 }
 
 const RE_DIGIT_STRIP = new RegExp(`[-－ー‐−${WS}　]`, 'gu');
@@ -2345,7 +2373,10 @@ function fillTable(f, value, put, key) {
     } else {
       throw new FillError('表の各行はオブジェクトか配列で指定してください');
     }
-    for (const [ci, v] of items) put(f.sheet, `${f.columns[ci].col}${r}`, v, `${key}[${i}].${colIds[ci]}`, f.id);
+    for (const [ci, v] of items) {
+      if (v === null || v === undefined || v === '') continue; // leave the cell as it is
+      put(f.sheet, `${f.columns[ci].col}${r}`, isStr(v) ? num(v) : v, `${key}[${i}].${colIds[ci]}`, f.id);
+    }
   });
 }
 
@@ -2387,7 +2418,7 @@ async function fill(wb, data, opts = {}) {
   let fields = opts.fields || null;
   if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new FillError('値はJSONオブジェクト（{ "id": 値, ... }）で指定してください');
   if (!fields) fields = detect(wb, sheet);
-  const report = { verified: null, written: [], unknown_keys: [], unfilled: [], errors: [], ok: false };
+  const report = { verified: null, written: [], unknown_keys: [], unfilled: [], warnings: [], errors: [] };
   const updates = new Map();
   const sheetPath = new Map(wb.sheets.map((s) => [s.name, s.path]));
   const defaultSheet = sheet ? wb.sheet(sheet).name : formSheets(wb)[0].name;
@@ -2432,7 +2463,12 @@ async function fill(wb, data, opts = {}) {
       if (f.kind === 'table') fillTable(f, value, put, key);
       else if (f.kind === 'split' || f.kind === 'digits') fillParts(f, value, put, key);
       else if (f.kind === 'choice_cells') fillChoiceCells(f, value, put, key, mark);
-      else put(f.sheet, f.cell, formatFieldValue(wb, f, value, mark, today), key, f.id);
+      else {
+        if (f.kind === 'inline_date' && placeholderDates(f.template || '').length > 1 && parseDate(value) !== null) {
+          report.warnings.push(`${key}: 期間の欄に日付が1つだけです（終了日は空欄のまま）`);
+        }
+        put(f.sheet, f.cell, formatFieldValue(wb, f, value, mark, today), key, f.id);
+      }
     } catch (e) {
       if (e instanceof FillError) report.errors.push(`${key}: ${e.message}`);
       else throw e;
@@ -2449,8 +2485,21 @@ async function fill(wb, data, opts = {}) {
       if (!report.verified) bytes = null; // never hand out a file we could not verify
     }
   }
-  report.ok = !report.errors.length && !report.unknown_keys.length;
-  return { report, bytes };
+  return { report: reportToDict(report), bytes };
+}
+/** Same keys and order as the Python FillReport.to_dict() */
+function reportToDict(r) {
+  const saved = !r.errors.length && r.verified !== null;
+  return {
+    ok: !r.errors.length && !r.unknown_keys.length,
+    saved,
+    verified: r.verified,
+    [saved ? 'written' : 'planned']: r.written,
+    unknown_keys: r.unknown_keys,
+    unfilled: r.unfilled,
+    warnings: r.warnings,
+    errors: r.errors,
+  };
 }
 function farOutside(sheet, ref) {
   let r, c;
@@ -2466,9 +2515,49 @@ const KIND_JA = {
   circle: '選択(○で囲む)', choice_cells: '選択(□別セル)', pattern: '書式入り(〒・電話・時刻)', split: '分割欄', digits: '1文字1マス',
 };
 function cellMd(text) { return text.replace(/\|/g, '\\|').replace(/\n/g, ' '); }
-function sheetToMarkdown(wb, sheetName = null, layout = true) {
+function pyTruthy(v) {
+  if (v === null || v === undefined || v === '' || v === false) return false;
+  if (typeof v === 'number') return v !== 0;
+  if (v instanceof PyFloat) return v.v !== 0;
+  return true;
+}
+/** What is in the form now, for a (saved) field definition. */
+function currentValue(sheet, f) {
+  const at = (ref) => sheet.value(...parseRef(ref));
+  if (f.kind === 'table') {
+    const rows = [];
+    for (const r of f.rows) {
+      const row = Object.fromEntries(f.columns.map((c) => [c.id, at(`${c.col}${r}`)]));
+      if (Object.values(row).some((v) => v !== null && v !== '')) rows.push(row);
+    }
+    return rows.length ? rows : null;
+  }
+  if (f.kind === 'digits') {
+    const s = f.parts.map((p) => { const c = at(p.cell); return c === null ? '' : pyStr(c); }).join('');
+    return s || null;
+  }
+  if (f.kind === 'split') {
+    const vals = f.parts.map((p) => at(p.cell));
+    if (vals.every((v) => v === null || v === '')) return null;
+    return vals.map((v, i) => `${v === null ? '' : pyStr(v)}${f.parts[i].suffix || ''}`).join('');
+  }
+  if (f.kind === 'choice_cells') {
+    const sel = f.parts.filter((p) => { const v = at(p.cell); return CHECKED_CHARS.includes(pyTruthy(v) ? pyStr(v) : ''); }).map((p) => p.option);
+    return sel.length ? sel : null;
+  }
+  const v = at(f.cell);
+  if (['inline_date', 'pattern', 'inline_text', 'choice', 'circle'].includes(f.kind) && v === f.template) return null; // still the printed placeholder
+  return v;
+}
+/** With *fields* (saved before filling) ids stay stable and current values are shown. */
+function sheetToMarkdown(wb, sheetName = null, layout = true, savedFields = null) {
   const sheet = wb.sheet(sheetName);
-  const fields = detectSheet(sheet, wb.styles);
+  let fields;
+  if (savedFields === null) fields = detectSheet(sheet, wb.styles);
+  else {
+    fields = savedFields.filter((f) => f.sheet === sheet.name);
+    for (const f of fields) f.value = currentValue(sheet, f);
+  }
   const lines = [`# ${sheet.name}`, ''];
   lines.push('## 入力欄', '', '| id | 種類 | セル | 補足 |', '|---|---|---|---|');
   for (const f of fields) {
@@ -2478,7 +2567,12 @@ function sheetToMarkdown(wb, sheetName = null, layout = true) {
     else if (f.parts.length) extra = 'マス: ' + f.parts.map((p) => p.cell + (p.suffix || '')).join(' ');
     else if (f.template) extra = '書式: ' + f.template.replace(/\n/g, ' ');
     if (f.suffix) extra = stripWS(extra + ` 単位: ${f.suffix}`);
-    if (f.value !== null && f.value !== undefined && f.value !== '') extra = stripWS(extra + ` 現在値: ${pyStr(f.value)}`);
+    if (f.value !== null && f.value !== undefined && f.value !== '' && !(Array.isArray(f.value) && !f.value.length)) {
+      let v = f.value;
+      if (Array.isArray(v) && v.length && v[0] !== null && typeof v[0] === 'object' && !Array.isArray(v[0])) v = `${v.length}行記入済み`;
+      else if (Array.isArray(v)) v = v.map(pyStr).join('・');
+      extra = stripWS(extra + ` 現在値: ${pyStr(v)}`);
+    }
     if (f.section) extra = stripWS(`[${f.section}] ` + extra);
     lines.push(`| ${cellMd(f.id)} | ${KIND_JA[f.kind] ?? f.kind} | ${f.range} | ${cellMd(extra)} |`);
   }
@@ -2511,7 +2605,11 @@ function sheetToMarkdown(wb, sheetName = null, layout = true) {
   }
   return lines.join('\n');
 }
-function workbookToMarkdown(wb, layout = true) {
+function workbookToMarkdown(wb, layout = true, savedFields = null) {
+  if (savedFields !== null) {
+    const names = [...new Set(savedFields.map((f) => f.sheet))];
+    return names.map((n) => sheetToMarkdown(wb, n, layout, savedFields)).join('\n');
+  }
   return wb.sheets.filter((s) => !s.hidden).map((s) => sheetToMarkdown(wb, s.name, layout)).join('\n');
 }
 function templateFor(fields) {
@@ -2531,7 +2629,7 @@ root.Masume = {
   fill, formatDate, formatChoice, formatCircle, formatPattern, formatInline, formatFieldValue, resolve,
   parseDate, toWareki, usesWareki, placeholderDates, previewCells,
   // rendering
-  sheetToMarkdown, workbookToMarkdown, templateFor, KIND_JA,
+  sheetToMarkdown, workbookToMarkdown, templateFor, currentValue, KIND_JA,
   // helpers
   parseRef, makeRef, parseRange, colToIdx, idxToCol, pyStr, pyRepr, pyFloatRepr, PyFloat,
   crc32, readZip, zipRead, zipFiles, inflateRaw, deflateRaw,
@@ -2704,7 +2802,13 @@ function textCtrl(f, id, body) {
   const coerce = f.kind === 'text';
   const ctrl = makeCtrl(f,
     () => (el.value === '' ? undefined : coerce ? coerceNumber(el.value) : el.value),
-    (v) => { el.value = display(v); if (v === null) el.placeholder = '（null: セルを空にします）'; });
+    (v) => {
+      // lists in the template's own notation: [18, "05"] -> 18:05 (時刻), ["03","1234","5678"] -> 03-1234-5678, digits -> 1234567
+      if (Array.isArray(v) && v.every((x) => x === null || typeof x !== 'object')) {
+        el.value = v.map(display).join(f.kind === 'digits' ? '' : /時/.test(f.template || '') ? ':' : '-');
+      } else el.value = display(v);
+      if (v === null) el.placeholder = '（null: セルを空にします）';
+    });
   el.addEventListener('input', () => ctrl.edited());
   return ctrl;
 }
@@ -3147,20 +3251,26 @@ function outName() {
   const base = (m && m[1]) || 'form';
   return `${base}_記入済${m && m[2] ? '.xlsm' : '.xlsx'}`;
 }
-function renderReport(rep, name) {
+function renderReport(rep, name, readback) {
   const el = $('#report');
   el.textContent = '';
+  rep = { unknown_keys: [], unfilled: [], warnings: [], errors: [], ...rep };
+  const written = rep.written || rep.planned || [];
   const kind = rep.errors.length ? 'err' : rep.unknown_keys.length ? 'warn' : 'ok';
   const box = h('div', { class: `msg ${kind}` });
   if (rep.errors.length) {
     box.append(h('strong', null, 'ダウンロードできませんでした。'), h('ul', null, rep.errors.map((x) => h('li', null, x))));
   } else {
-    box.append(h('strong', null, `${name} を作成しました。`), ` ${rep.written.length}セルに書き込み`,
+    box.append(h('strong', null, `${name} を作成しました。`), ` ${written.length}セルに書き込み`,
       rep.verified ? '、保存後に読み戻して一致を確認しました。' : '。');
   }
+  if (rep.warnings.length) box.append(h('div', null, '注意:'), h('ul', null, rep.warnings.map((x) => h('li', null, x))));
   if (rep.unknown_keys.length) box.append(h('div', null, 'フォームに見つからず無視したキー:'), h('ul', null, rep.unknown_keys.map((x) => h('li', null, x))));
   if (rep.unfilled.length && !rep.errors.length) {
     box.append(h('details', null, h('summary', null, `未記入の欄（${rep.unfilled.length}）`), h('ul', null, rep.unfilled.map((x) => h('li', null, x)))));
+  }
+  if (readback) {
+    box.append(h('details', null, h('summary', null, '記入後のファイルを読み直した結果（入力欄と現在値）'), h('pre', { class: 'code' }, readback)));
   }
   el.append(box);
 }
@@ -3187,7 +3297,15 @@ $('#download').addEventListener('click', async () => {
   try {
     const { report, bytes } = await M.fill(state.wb, data, { mark: $('#mark').value });
     const name = outName();
-    renderReport(report, name);
+    let readback = null;
+    if (bytes) {
+      // re-open the produced file with the field definitions used for filling (like `masume md --fields`)
+      try {
+        const saved = state.fields.map((f) => M.Field.fromDict(JSON.parse(JSON.stringify(f.toDict()))));
+        readback = M.workbookToMarkdown(await M.load(bytes), false, saved);
+      } catch (e) { console.error(e); }
+    }
+    renderReport(report, name, readback);
     if (!report.errors.length && bytes) {
       const mime = name.endsWith('.xlsm') ? 'application/vnd.ms-excel.sheet.macroEnabled.12' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       triggerDownload(bytes, name, mime);
