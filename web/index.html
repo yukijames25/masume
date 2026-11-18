@@ -1903,7 +1903,17 @@ function detectSheet(sheet, styles) {
   for (const lab of labels) {
     if (usedLabels.has(lab) || claimed.has(lab)) continue;
     const n = normalizeLabel(lab.text);
-    if (!(cpLen(n) >= 2 && cpLen(n) <= 10) || /[。、，,]/u.test(n) || g.headingStyled(lab) || !lab.merged) continue;
+    if (!(cpLen(n) >= 2 && cpLen(n) <= 10) || /[。、，,]/u.test(n) || g.headingStyled(lab)) continue;
+    let under = null;
+    if (!lab.merged) {
+      // an unmerged caption spills over the cells to its right, so its value goes under it;
+      // only inside a ruled frame (a rule right above it), never for free-floating text
+      const above = g.at(lab.r1 - 1, lab.c1);
+      const ruled = lab.sides.has('top') || (above !== null && above.sides.has('bottom'));
+      under = g.at(lab.r2 + 1, lab.c1);
+      if (!ruled || under === null || !under.empty || under.merged || claimed.has(under) ||
+          under.sides.has('top') || lab.sides.has('bottom')) continue;
+    }
     const upper = g.at(lab.r1 - 1, lab.c1);
     if (/^[（(]/u.test(lab.text) && upper !== null && usedLabels.has(upper) && upper.c1 === lab.c1 && upper.c2 === lab.c2) {
       usedLabels.add(lab); // 「所在地」+「（住所）」 on the next line: one label
@@ -1918,7 +1928,7 @@ function detectSheet(sheet, styles) {
       c = reg.c2 + 1;
     }
     if (free >= 4) {
-      const box = g.at(lab.r1, lab.c2 + 1);
+      const box = under !== null ? under : g.at(lab.r1, lab.c2 + 1);
       claimed.add(box);
       usedLabels.add(lab);
       fields.push(makeBoxField(sheet, lab.text, 'text', [box], null, [null]));

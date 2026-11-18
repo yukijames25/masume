@@ -63,6 +63,7 @@ def build(path):
     for c in range(15, 28):  # 13 one-character boxes O11:AA11
         side(ws, 11, c, left=T, right=T, top=T, bottom=T)
     ws.merge_cells("K12:N12"); ws["K12"] = "担当者名"
+    ws["U12"] = "担当課"  # unmerged caption under a rule: its value goes under it (U13)
     wb.save(path)
 
 

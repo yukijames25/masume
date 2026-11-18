@@ -579,8 +579,18 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
         if lab in used_labels or lab in claimed:
             continue
         n = normalize_label(lab.text)
-        if not 2 <= len(n) <= 10 or re.search(r"[。、，,]", n) or g.heading_styled(lab) or not lab.merged:
+        if not 2 <= len(n) <= 10 or re.search(r"[。、，,]", n) or g.heading_styled(lab):
             continue
+        under = None
+        if not lab.merged:
+            # an unmerged caption spills over the cells to its right, so its value goes under it;
+            # only inside a ruled frame (a rule right above it), never for free-floating text
+            above = g.at(lab.r1 - 1, lab.c1)
+            ruled = "top" in lab.sides or (above is not None and "bottom" in above.sides)
+            under = g.at(lab.r2 + 1, lab.c1)
+            if (not ruled or under is None or not under.empty or under.merged or under in claimed
+                    or "top" in under.sides or "bottom" in lab.sides):
+                continue
         upper = g.at(lab.r1 - 1, lab.c1)
         if (lab.text.strip()[:1] in "（(" and upper is not None and upper in used_labels
                 and (upper.c1, upper.c2) == (lab.c1, lab.c2)):
@@ -598,7 +608,7 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
             free += 1
             c = reg.c2 + 1
         if free >= 4:
-            box = g.at(lab.r1, lab.c2 + 1)
+            box = under if under is not None else g.at(lab.r1, lab.c2 + 1)
             claimed.add(box)
             used_labels.add(lab)
             fields.append(_make_box_field(sheet, lab.text, "text", [box], None, [None]))
