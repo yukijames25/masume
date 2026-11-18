@@ -1885,7 +1885,7 @@ function scanRight(g, lab, row, claimed, used) {
           boxes.push(reg); suffixes.push(null); c = reg.c2 + 1; continue; // digits or underline run
         }
         if (lastBox && suffixes[suffixes.length - 1] === null && reg.merged && lastBox.merged &&
-            reg.width === lastBox.width && lastBox.width <= 3 && reg.r1 === lastBox.r1 && reg.r2 === lastBox.r2) {
+            reg.width === lastBox.width && lastBox.width <= 6 && reg.r1 === lastBox.r1 && reg.r2 === lastBox.r2) {
           boxes.push(reg); suffixes.push(null); c = reg.c2 + 1; continue; // [ ][ ][ ] merged per character
         }
         if (boxes.length && suffixes[suffixes.length - 1] === null) break; // separate fields
@@ -1913,9 +1913,11 @@ function scanRight(g, lab, row, claimed, used) {
   }
   if (!boxes.length) return null;
   const singleCells = boxes.filter((b) => !b.merged);
-  const uniform = new Set(boxes.map((b) => `${b.width},${b.r1},${b.r2}`)).size === 1 && boxes[0].width <= 3;
-  if (boxes.length >= 3 && suffixes.every((s) => s === null) && uniform && singleCells.length !== boxes.length) {
-    return ['digits', boxes, prefix, suffixes];
+  if (boxes.length >= 2 && !singleCells.length && suffixes.every((s) => s === null) &&
+      new Set(boxes.map((b) => `${b.width},${b.r1},${b.r2}`)).size === 1) {
+    // [ ][ ][ ] one merged box per character (法人番号); few or wide boxes: keep the first only
+    if (boxes.length >= (boxes[0].width <= 3 ? 3 : 8)) return ['digits', boxes, prefix, suffixes];
+    boxes = boxes.slice(0, 1); suffixes = suffixes.slice(0, 1);
   }
   if (boxes.length >= 3 && singleCells.length === boxes.length && suffixes.every((s) => s === null)) {
     const vertical = boxes.filter((b) => b.sides.has('left') || b.sides.has('right')).length;

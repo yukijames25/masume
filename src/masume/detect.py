@@ -662,7 +662,7 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set):
                     c = reg.c2 + 1
                     continue
                 if (boxes and suffixes[-1] is None and reg.merged and boxes[-1].merged
-                        and reg.width == boxes[-1].width <= 3 and (reg.r1, reg.r2) == (boxes[-1].r1, boxes[-1].r2)):
+                        and reg.width == boxes[-1].width <= 6 and (reg.r1, reg.r2) == (boxes[-1].r1, boxes[-1].r2)):
                     boxes.append(reg)  # [ ][ ][ ] merged per character
                     suffixes.append(None)
                     c = reg.c2 + 1
@@ -703,9 +703,12 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set):
         return None
     # trim trailing boxes that are not followed by a unit when we have a split
     single_cells = [b for b in boxes if not b.merged]
-    uniform = len({(b.width, b.r1, b.r2) for b in boxes}) == 1 and boxes[0].width <= 3
-    if len(boxes) >= 3 and all(s is None for s in suffixes) and uniform and len(single_cells) != len(boxes):
-        return "digits", boxes, prefix, suffixes
+    if (len(boxes) >= 2 and not single_cells and all(s is None for s in suffixes)
+            and len({(b.width, b.r1, b.r2) for b in boxes}) == 1):
+        # [ ][ ][ ] one merged box per character (法人番号); few or wide boxes: keep the first only
+        if len(boxes) >= (3 if boxes[0].width <= 3 else 8):
+            return "digits", boxes, prefix, suffixes
+        boxes, suffixes = boxes[:1], suffixes[:1]
     if len(boxes) >= 3 and len(single_cells) == len(boxes) and all(s is None for s in suffixes):
         vertical = sum(1 for b in boxes if {"left", "right"} & b.sides)
         if vertical >= len(boxes) - 1:

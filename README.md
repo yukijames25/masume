@@ -94,8 +94,9 @@ claude mcp add masume -- python -m masume.mcp_server   # pip install -e . 済み
 
 ## 制限
 
-- `.xls`（旧形式）は非対応。Excel で `.xlsx` に保存し直してください。
-- 検出はヒューリスティックです。外れた欄はセル番地で直接指定できます。
+- `.xls`（旧形式）は `masume convert` で `.xlsx` にしてから使います（Excel か LibreOffice が必要）。
+- 検出はヒューリスティックです。外れた欄はセル番地で直接指定するか、`inspect --json` の結果を直して `--fields` で使い回せます。
+- 実在の自治体様式6件での結果は [docs/REAL_FORMS.md](docs/REAL_FORMS.md)。1ページの届出書・申請書は実用レベル、大きな様式や数値明細は手直しが必要です。
 
 ## 開発
 

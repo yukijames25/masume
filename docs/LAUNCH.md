@@ -68,5 +68,5 @@ $ masume fill 休暇届.xlsx values.json -o 休暇届_記入済.xlsx
 - [ ] GitHub リポジトリ作成（ライセンス MIT）。`tests/fixtures*` はすべて自作の架空様式なので同梱してよい
 - [ ] PyPI 名 `masume` の空きを確認
 - [ ] README のスクリーンショット（ブラウザ版のサンプル）
-- [ ] 実在の自治体様式3つで動作確認（ダウンロード元と利用規約を確認すること）
+- [x] 実在の自治体様式で動作確認（広島市の6件、結果は docs/REAL_FORMS.md）。記事に様式の画像を載せるなら利用規約を確認すること
 - [ ] Zenn に記事、X で告知、Claude の MCP / Skill ディレクトリに登録
