@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "masume"
+version = "0.1.0"
+description = "Let AI agents read and fill Japanese 'Excel 方眼紙' forms without breaking them. Zero dependencies."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+keywords = ["excel", "xlsx", "mcp", "japanese", "forms", "方眼紙"]
+
+[project.optional-dependencies]
+dev = ["openpyxl"]
+
+[project.scripts]
+masume = "masume.cli:main"
+masume-mcp = "masume.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
