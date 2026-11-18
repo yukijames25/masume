@@ -340,7 +340,8 @@ def is_frame(reg: Region | None) -> bool:
 
 def has_heading_cue(text: str) -> bool:
     t = text.strip()
-    return bool(t) and (t[0] in HEADING_MARKS or t.startswith("【") or bool(re.match(r"^第.{1,3}[章節部]", t)))
+    return bool(t) and (t[0] in HEADING_MARKS or t.startswith("【") or bool(re.match(r"^第.{1,3}[章節部]", t))
+                        or bool(re.match(r"^[0-9０-９]{1,2}[\s　]+\S", t)))  # 「１　変更理由等」
 
 
 def _is_box(reg: Region | None) -> bool:
@@ -392,8 +393,13 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
     def new(label, reg, kind, **kw) -> Field:
         return Field("", label, sheet.name, reg.ref, reg.range, kind, **kw)
 
+    # ---- 0. comparison grids: 事項 | 変更前 | 変更後 ------------------------
+    fields.extend(_comparison_fields(g, sheet, regions, used_labels, claimed))
+
     # ---- 1. tables -------------------------------------------------------
     for tf, header_regs, body_regs in _detect_tables(g, regions):
+        if any(b in claimed for b in body_regs) or any(h in used_labels for h in header_regs):
+            continue  # already read as a comparison grid
         fields.append(tf)
         used_labels.update(header_regs)
         claimed.update(body_regs)
@@ -431,6 +437,8 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
             label = t[:first].strip(" 　：:")
             if len(opts) < 2 and lab is None and not label:
                 continue  # 「■ 申込者情報」 is a heading, not a checkbox
+            if len(opts) < 2 and "ください" in t:
+                continue  # 「該当する項目に☑してください。」 is an instruction
             if not label and lab is not None:
                 label = lab.text
             if lab is not None and label == lab.text:
@@ -597,7 +605,7 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
 
     # ---- 6. furigana ids ----------------------------------------------------
     for f in fields:
-        if normalize_label(f.label) in _FURIGANA:
+        if normalize_label(f.label) in _FURIGANA and not f.id_hint:
             lab_reg = next((r for r in regions if r.text == f.label and r.r1 == _row_of(f.cell)), None)
             if lab_reg is not None:
                 below = g.at(lab_reg.r2 + 1, lab_reg.c1)
@@ -634,7 +642,7 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
     return fields
 
 
-def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set):
+def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set, stop_col: int | None = None):
     """Find box(es) right of *lab* on *row*.
 
     Returns (kind, boxes, prefix, suffixes) or None. Handles 〒 prefixes,
@@ -646,9 +654,10 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set):
     boxes: list[Region] = []
     suffixes: list[str | None] = []
     spacer = 0
-    while c <= g.max_col:
+    last_col = g.max_col if stop_col is None else min(stop_col, g.max_col)
+    while c <= last_col:
         reg = g.at(row, c)
-        if reg is None or reg in claimed:
+        if reg is None or reg in claimed or reg.c2 > last_col:
             break
         if reg.r1 != row and not (reg.r1 <= row <= reg.r2):
             break
@@ -727,6 +736,107 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set):
     if not b.merged and "bottom" not in b.sides and len(b.sides) < 3:
         return None  # a corner of a frame, not a box
     return "text", boxes, prefix, suffixes
+
+
+def _comparison_fields(g: Grid, sheet: Sheet, regions: list[Region], used: set, claimed: set) -> list[Field]:
+    """「事項 | 変更前 | 変更後」: row labels on the left, 2-4 wide column headers on top.
+
+    Every row label gets one field per column (id 「名称（氏名）/変更後」), read with
+    the same box scanner as ordinary rows but kept inside the column.
+    """
+    out: list[Field] = []
+    by_row: dict[int, list[Region]] = {}
+    for reg in regions:
+        by_row.setdefault(reg.r1, []).append(reg)
+    for r, regs in sorted(by_row.items()):
+        heads = sorted((x for x in regs if is_label(x) and x.merged and x.width >= 8
+                        and x not in used and x not in claimed), key=lambda x: x.c1)
+        run: list[Region] = []
+        for h in heads:
+            if run and (h.c1 != run[-1].c2 + 1 or (h.r1, h.r2) != (run[0].r1, run[0].r2)):
+                if len(run) >= 2:
+                    break
+                run = []
+            run.append(h)
+        if not 2 <= len(run) <= 4:
+            continue
+        widths = [h.width for h in run]
+        if max(widths) > 1.5 * min(widths):
+            continue
+        first = run[0]
+
+        def row_label(row: int) -> Region | None:
+            c = first.c1 - 1
+            while c >= 1:
+                reg = g.at(row, c)
+                if reg is None:
+                    return None
+                if not reg.empty:
+                    return reg if is_label(reg) and reg.r1 <= row else None
+                c = reg.c1 - 1
+            return None
+
+        body: list[tuple[Region, list]] = []
+        taken: set[Region] = set()
+        row = first.r2 + 1
+        while row <= g.max_row:
+            lab = row_label(row)
+            if lab is None or lab in claimed:
+                break
+            cols = []
+            for rr in range(lab.r1, lab.r2 + 1):
+                for h in run:
+                    edge = Region(rr, h.c1 - 1, rr, h.c1 - 1, None, False, False)
+                    res = _scan_right(g, edge, rr, claimed, used, stop_col=h.c2)
+                    if res is None:
+                        continue
+                    kind, boxes, prefix, suffixes = res
+                    keep = [i for i, b in enumerate(boxes) if b.c2 <= h.c2]
+                    if not keep:
+                        continue
+                    boxes = [boxes[i] for i in keep]
+                    suffixes = [suffixes[i] for i in keep]
+                    if kind in ("split", "digits") and len(boxes) == 1:
+                        kind = "text"
+                    if any(b in taken for b in boxes):
+                        continue  # a box spanning two rows of a tall label
+                    taken.update(boxes)
+                    cols.append((rr, h, kind, boxes, prefix, suffixes))
+            if not cols:
+                break
+            body.append((lab, cols))
+            row = lab.r2 + 1
+        if len(body) < 2:
+            continue
+        labels_in_order = [lab for lab, _ in body]
+        for i, (lab, cols) in enumerate(body):
+            base = normalize_label(lab.text)
+            if base in _FURIGANA and i + 1 < len(labels_in_order):
+                base = f"{normalize_label(labels_in_order[i + 1].text)}(ふりがな)"
+            rows_seen: dict[str, int] = {}
+            for rr, h, kind, boxes, prefix, suffixes in cols:
+                col = normalize_label(h.text)
+                if prefix == "〒":
+                    name = base + "(〒)"  # the address itself goes in the row below: 「所在地」
+                else:
+                    n = rows_seen.get(col, 0) + 1
+                    rows_seen[col] = n
+                    name = base + (f"({n})" if n > 1 else "")
+                f = _make_box_field(sheet, lab.text, kind, boxes, None, suffixes)
+                if prefix and prefix != "〒":
+                    f.template = prefix  # 「（ ） -」 printed before the first box
+                f.id_hint = f"{name}/{col}"
+                out.append(f)
+                claimed.update(boxes)
+            used.add(lab)
+            claimed.add(lab)  # no second pass over its other rows
+        used.update(run)
+        corner = g.at(first.r1, first.c1 - 1)
+        while corner is not None and corner.empty and corner.c1 > 1:
+            corner = g.at(first.r1, corner.c1 - 1)
+        if corner is not None and is_label(corner):
+            used.add(corner)  # 「事項」
+    return out
 
 
 def _control_fields(g: Grid, sheet: Sheet, used: set, claimed: set) -> list[Field]:

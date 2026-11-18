@@ -1686,7 +1686,8 @@ function isFrame(reg) {
 const RE_CHAPTER = /^第[^\n]{1,3}[章節部]/u;
 function hasHeadingCue(text) {
   const t = stripWS(text);
-  return !!t && (HEADING_MARKS.includes(firstCp(t)) || t.startsWith('【') || RE_CHAPTER.test(t));
+  return !!t && (HEADING_MARKS.includes(firstCp(t)) || t.startsWith('【') || RE_CHAPTER.test(t) ||
+    /^[0-9０-９]{1,2}[\s　]+\S/u.test(t)); // 「１　変更理由等」
 }
 function isBox(reg) { return reg != null && reg.empty && (reg.merged || reg.bordered) && !isFrame(reg); }
 function dateLikeLabel(label) { return label.endsWith('日') || label.includes('年月日') || label === '日付' || label === '期日'; }
@@ -1721,8 +1722,12 @@ function detectSheet(sheet, styles) {
   };
   const nw = (label, reg, kind, o) => new Field('', label, sheet.name, reg.ref, reg.range, kind, o);
 
+  // ---- 0. comparison grids: 事項 | 変更前 | 変更後
+  fields.push(...comparisonFields(g, sheet, regions, usedLabels, claimed));
+
   // ---- 1. tables
   for (const [tf, headerRegs, bodyRegs] of detectTables(g, regions)) {
+    if (bodyRegs.some((b) => claimed.has(b)) || headerRegs.some((h) => usedLabels.has(h))) continue; // read as a comparison grid
     fields.push(tf);
     usedLabels.addAll(headerRegs);
     claimed.addAll(bodyRegs);
@@ -1758,6 +1763,7 @@ function detectSheet(sheet, styles) {
       for (const ch of BOX_CHARS) { const k = t.indexOf(ch); if (k >= 0 && k < first) first = k; }
       let label = pyStrip(t.slice(0, first), ' 　：:');
       if (opts.length < 2 && lab === null && !label) continue; // 「■ 申込者情報」 is a heading
+      if (opts.length < 2 && t.includes('ください')) continue; // 「該当する項目に☑してください。」 is an instruction
       if (!label && lab !== null) label = lab.text;
       if (lab !== null && label === lab.text) usedLabels.add(lab);
       const checked = opts.filter((o) => new RegExp(`[${CHECKED_CHARS}][${WS}]*${escapeRe(o)}`, 'u').test(t));
@@ -1921,7 +1927,7 @@ function detectSheet(sheet, styles) {
 
   // ---- 6. furigana ids
   for (const f of fields) {
-    if (FURIGANA.has(normalizeLabel(f.label))) {
+    if (FURIGANA.has(normalizeLabel(f.label)) && !f.id_hint) {
       const labReg = regions.find((r) => r.text === f.label && r.r1 === rowOf(f.cell));
       if (labReg !== undefined) {
         const below = g.at(labReg.r2 + 1, labReg.c1);
@@ -1957,15 +1963,16 @@ function detectSheet(sheet, styles) {
   return fields;
 }
 
-function scanRight(g, lab, row, claimed, used) {
+function scanRight(g, lab, row, claimed, used, stopCol = null) {
   let c = lab.c2 + 1;
+  const lastCol = stopCol === null ? g.maxCol : Math.min(stopCol, g.maxCol);
   let prefix = null;
   let boxes = [];
   let suffixes = [];
   let spacer = 0;
-  while (c <= g.maxCol) {
+  while (c <= lastCol) {
     const reg = g.at(row, c);
-    if (reg === null || claimed.has(reg)) break;
+    if (reg === null || claimed.has(reg) || reg.c2 > lastCol) break;
     if (reg.r1 !== row && !(reg.r1 <= row && row <= reg.r2)) break;
     if (reg.empty) {
       const lastBox = boxes.length ? boxes[boxes.length - 1] : null;
@@ -2023,6 +2030,96 @@ function scanRight(g, lab, row, claimed, used) {
   const b0 = boxes[0];
   if (!b0.merged && !b0.sides.has('bottom') && sideList(b0).length < 3) return null; // a corner of a frame
   return ['text', boxes, prefix, suffixes];
+}
+
+/**
+ * 「事項 | 変更前 | 変更後」: row labels on the left, 2-4 wide column headers on top.
+ * Every row label gets one field per column (id 「名称（氏名）/変更後」).
+ */
+function comparisonFields(g, sheet, regions, used, claimed) {
+  const out = [];
+  const byRow = new Map();
+  for (const reg of regions) { if (!byRow.has(reg.r1)) byRow.set(reg.r1, []); byRow.get(reg.r1).push(reg); }
+  for (const r of [...byRow.keys()].sort((a, b) => a - b)) {
+    const heads = byRow.get(r).filter((x) => isLabel(x) && x.merged && x.width >= 8 && !used.has(x) && !claimed.has(x)).sort((a, b) => a.c1 - b.c1);
+    let run = [];
+    for (const h of heads) {
+      if (run.length && (h.c1 !== run[run.length - 1].c2 + 1 || h.r1 !== run[0].r1 || h.r2 !== run[0].r2)) {
+        if (run.length >= 2) break;
+        run = [];
+      }
+      run.push(h);
+    }
+    if (!(run.length >= 2 && run.length <= 4)) continue;
+    const widths = run.map((h) => h.width);
+    if (Math.max(...widths) > 1.5 * Math.min(...widths)) continue;
+    const first = run[0];
+    const rowLabel = (row) => {
+      let c = first.c1 - 1;
+      while (c >= 1) {
+        const reg = g.at(row, c);
+        if (reg === null) return null;
+        if (!reg.empty) return isLabel(reg) && reg.r1 <= row ? reg : null;
+        c = reg.c1 - 1;
+      }
+      return null;
+    };
+    const body = [];
+    const taken = new RSet();
+    let row = first.r2 + 1;
+    while (row <= g.maxRow) {
+      const lab = rowLabel(row);
+      if (lab === null || claimed.has(lab)) break;
+      const cols = [];
+      for (let rr = lab.r1; rr <= lab.r2; rr++) {
+        for (const h of run) {
+          const edge = new Region(rr, h.c1 - 1, rr, h.c1 - 1, null, false, false);
+          const res = scanRight(g, edge, rr, claimed, used, h.c2);
+          if (res === null) continue;
+          let [kind, boxes, prefix, suffixes] = res;
+          const keep = boxes.map((b, i) => (b.c2 <= h.c2 ? i : -1)).filter((i) => i >= 0);
+          if (!keep.length) continue;
+          boxes = keep.map((i) => boxes[i]);
+          suffixes = keep.map((i) => suffixes[i]);
+          if ((kind === 'split' || kind === 'digits') && boxes.length === 1) kind = 'text';
+          if (boxes.some((b) => taken.has(b))) continue; // a box spanning two rows of a tall label
+          taken.addAll(boxes);
+          cols.push([rr, h, kind, boxes, prefix, suffixes]);
+        }
+      }
+      if (!cols.length) break;
+      body.push([lab, cols]);
+      row = lab.r2 + 1;
+    }
+    if (body.length < 2) continue;
+    body.forEach(([lab, cols], i) => {
+      let base = normalizeLabel(lab.text);
+      if (FURIGANA.has(base) && i + 1 < body.length) base = `${normalizeLabel(body[i + 1][0].text)}(ふりがな)`;
+      const rowsSeen = new Map();
+      for (const [rr, h, kind, boxes, prefix, suffixes] of cols) {
+        const col = normalizeLabel(h.text);
+        let name;
+        if (prefix === '〒') name = base + '(〒)'; // the address itself goes in the row below
+        else {
+          const n = (rowsSeen.get(col) || 0) + 1;
+          rowsSeen.set(col, n);
+          name = base + (n > 1 ? `(${n})` : '');
+        }
+        const f = makeBoxField(sheet, lab.text, kind, boxes, null, suffixes);
+        if (prefix && prefix !== '〒') f.template = prefix; // 「（ ） -」 printed before the first box
+        f.id_hint = `${name}/${col}`;
+        out.push(f);
+        claimed.addAll(boxes);
+      }
+      used.add(lab);
+      claimed.add(lab); // no second pass over its other rows
+    });
+    used.addAll(run);
+    let corner = g.at(first.r1, first.c1 - 1);
+    while (corner !== null && corner.empty && corner.c1 > 1) corner = g.at(first.r1, corner.c1 - 1);
+    if (corner !== null && isLabel(corner)) used.add(corner); // 「事項」
+  }
+  return out;
 }
 
 /** One field per form-control check box; its caption is the text right of it. */

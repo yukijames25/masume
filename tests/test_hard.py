@@ -274,3 +274,31 @@ class FormControlCheckboxTests(unittest.TestCase):
             self.assertTrue(rep.errors)  # unclear answers are refused, not guessed
         finally:
             shutil.rmtree(tmp)
+
+
+class ComparisonGridTests(unittest.TestCase):
+    """「事項 | 変更前 | 変更後」 grid (made by make_henko_fixture.py)."""
+
+    path = os.path.join(FX, "henko_todoke.xlsx")
+
+    def test_ids_per_row_and_column(self):
+        f = {x.id: x for x in detect(load(self.path))}
+        self.assertEqual(len(f), 10)
+        self.assertEqual(f["所在地（住所）(〒)/変更後"].cell, "S9")
+        self.assertEqual(f["所在地（住所）/変更後"].cell, "R10")
+        self.assertEqual(f["名称（氏名）(ふりがな)/変更前"].cell, "H6")
+        self.assertEqual([p.get("suffix") for p in f["電話番号/変更前"].parts], ["）", "－", None])
+
+    def test_fill(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            out = os.path.join(tmp, "o.xlsx")
+            rep = fill(self.path, out, {"所在地（住所）/変更後": "広島市南区1-2-3", "所在地（住所）(〒)/変更後": "732-0001",
+                                        "電話番号/変更後": "082-111-2222"})
+            self.assertEqual(rep.errors, [])
+            sh = load(out).sheet("変更届")
+            self.assertEqual(sh.value(10, 18), "広島市南区1-2-3")
+            self.assertEqual(sh.value(9, 19), "732-0001")
+            self.assertEqual([sh.value(11, c) for c in (19, 22, 25)], ["082", 111, 2222])
+        finally:
+            shutil.rmtree(tmp)

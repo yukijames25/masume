@@ -219,6 +219,8 @@ const fillCases = [
   { src: 'tests/fixtures_hard/checkbox_controls.xlsx', data: { '名称変更/社名変更': true, '名称変更/法人成り': false, '所在地変更/その他': 'はい', 氏名: '山田' },
     expect: { '変更届!F8': '山田' } },
   { src: 'tests/fixtures_hard/checkbox_controls.xlsx', data: { '名称変更/社名変更': 'たぶん' }, errors: true },
+  { src: 'tests/fixtures_hard/henko_todoke.xlsx', data: { '所在地（住所）/変更後': '広島市南区1-2-3', '所在地（住所）(〒)/変更後': '732-0001', '電話番号/変更後': '082-111-2222' },
+    expect: { '変更届!R10': '広島市南区1-2-3', '変更届!S9': '732-0001', '変更届!S11': '082', '変更届!V11': 111, '変更届!Y11': 2222 } },
   // tests/test_safety.py (fixtures_review: files saved by real Excel)
   { src: 'tests/fixtures_review/base.xlsx', data: { A11: 'x', A12: 'y', A14: 'z' }, expect: { 'Sheet1!A11': 'x', 'Sheet1!A12': 'y', 'Sheet1!A14': 'z' } },
   { src: 'tests/fixtures_review/empty.xlsx', data: { A1: 'a', B3: 'b', C2: 'c' }, expect: { 'Sheet1!A1': 'a', 'Sheet1!B3': 'b', 'Sheet1!C2': 'c' } },
