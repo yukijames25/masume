@@ -64,6 +64,8 @@ _OFFICE_USE = re.compile(r"受付印?$|受付番号|受理|記入欄$|処理欄|
 # the printed addressee 「広島市長」「〇〇税務署長」 is not a label
 _ADDRESSEE = re.compile(r"(?:市|区|町|村|都|道|府|県|署|所|局|庁)長$|知事$")
 _ERA_NAMES = {"令和", "平成", "昭和", "西暦"}
+# 「⑴ 名称変更」「(2) 所在地変更」: the group a check box belongs to
+_GROUP_NO = re.compile(r"^(?:[⑴-⒇①-⑳]|[（(][0-9０-９]{1,2}[)）])")
 
 
 def normalize_label(text: str) -> str:
@@ -476,6 +478,9 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
             claimed.add(reg)
             used_labels.add(reg)
 
+    # ---- 2b. form-control check boxes floating over the grid ---------------
+    fields.extend(_control_fields(g, sheet, used_labels, claimed))
+
     labels = [r for r in regions if free_label(r)]
 
     # ---- 3. label -> box(es) on the right --------------------------------
@@ -722,6 +727,51 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set):
     if not b.merged and "bottom" not in b.sides and len(b.sides) < 3:
         return None  # a corner of a frame, not a box
     return "text", boxes, prefix, suffixes
+
+
+def _control_fields(g: Grid, sheet: Sheet, used: set, claimed: set) -> list[Field]:
+    """One field per form-control check box; its caption is the text right of it."""
+    out: list[Field] = []
+    captions: set[Region] = set()
+    boxes = [c for c in sheet.controls if c.kind == "CheckBox"]
+    for ctl in boxes:
+        row = ctl.row
+        lab = None
+        for c in range(ctl.c1, ctl.c2 + 6):
+            reg = g.at(row, c)
+            if reg is not None and not reg.empty and isinstance(reg.value, str) and reg.c1 >= ctl.c1:
+                lab = reg
+                break
+        label = ctl.text or (lab.text if lab is not None else "")
+        if lab is not None and not ctl.text:
+            captions.add(lab)
+            nxt = g.at(lab.r2 + 1, lab.c1)
+            if (label.endswith("、") and nxt is not None and not nxt.empty and isinstance(nxt.value, str)
+                    and not any(b.row == nxt.r1 and abs(b.c1 - ctl.c1) <= 2 for b in boxes)):
+                label += nxt.text  # 「旧社名の法人は登記上存続し、」+「社名変更」
+                captions.add(nxt)
+        label = _SPACES.sub("", label) or "チェック"
+        f = Field("", label, sheet.name, make_ref(row, ctl.c1),
+                  f"{make_ref(ctl.r1, ctl.c1)}:{make_ref(ctl.r2, ctl.c2)}", "checkbox",
+                  options=[label], parts=[{"control": ctl.shape_id}], value=True if ctl.checked else None)
+        out.append(f)
+    for f, ctl in zip(out, boxes):
+        # the numbered group heading above it: 「⑵ 所在地変更」
+        for r in range(ctl.row - 1, max(ctl.row - 9, 0), -1):
+            hit = None
+            for c in range(max(ctl.c1 - 4, 1), ctl.c1 + 2):
+                reg = g.at(r, c)
+                if (reg is not None and reg.r1 == r and not reg.empty and isinstance(reg.value, str)
+                        and _GROUP_NO.match(normalize_label(reg.text))):
+                    hit = reg
+                    break
+            if hit is not None:
+                f.id_hint = _GROUP_NO.sub("", normalize_label(hit.text)) + "/" + normalize_label(f.label)
+                used.add(hit)
+                break
+    used.update(captions)
+    claimed.update(captions)
+    return out
 
 
 def _make_box_field(sheet: Sheet, label: str, kind: str, boxes: list[Region], prefix, suffixes) -> Field:

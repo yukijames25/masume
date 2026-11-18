@@ -245,3 +245,32 @@ class RealFormLayoutTests(unittest.TestCase):
             self.assertTrue(rep.errors)  # 平成 date into a 令和 form is an error, not a wrong year
         finally:
             shutil.rmtree(tmp)
+
+
+class FormControlCheckboxTests(unittest.TestCase):
+    """Excel form-control check boxes (made by make_control_fixture.py, opens in Excel)."""
+
+    path = os.path.join(FX, "checkbox_controls.xlsx")
+
+    def test_detect(self):
+        f = {x.id: x for x in detect(load(self.path))}
+        self.assertEqual({k for k, v in f.items() if v.kind == "checkbox"},
+                         {"名称変更/社名変更", "名称変更/法人成り", "所在地変更/事務所等の移転", "所在地変更/その他"})
+        self.assertTrue(f["名称変更/法人成り"].value)
+        self.assertIsNone(f["名称変更/社名変更"].value)
+        self.assertIn("氏名", f)  # the captions did not turn into text fields
+
+    def test_tick_and_untick(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            out = os.path.join(tmp, "o.xlsx")
+            rep = fill(self.path, out, {"名称変更/社名変更": True, "名称変更/法人成り": False,
+                                        "所在地変更/その他": "はい", "氏名": "山田"})
+            self.assertEqual(rep.errors, [])
+            self.assertTrue(rep.verified)
+            state = {c.shape_id: c.checked for c in load(out).sheet("変更届").controls}
+            self.assertEqual(state, {"1025": True, "1026": False, "1027": False, "1028": True})
+            rep = fill(self.path, os.path.join(tmp, "p.xlsx"), {"名称変更/社名変更": "たぶん"})
+            self.assertTrue(rep.errors)  # unclear answers are refused, not guessed
+        finally:
+            shutil.rmtree(tmp)

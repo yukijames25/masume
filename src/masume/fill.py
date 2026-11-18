@@ -275,6 +275,7 @@ def fill(
         fields = detect(wb, sheet)
     report = FillReport()
     updates: dict[str, dict[tuple[int, int], object]] = {}
+    controls: dict[str, tuple] = {}  # shape id -> (Control, checked)
     sheet_path = {s.name: s.path for s in wb.sheets}
     default_sheet = wb.sheet(sheet).name if sheet else form_sheets(wb)[0].name
     touched: set[str] = set()
@@ -336,6 +337,12 @@ def fill(
                 _fill_parts(f, value, put, key)
             elif f.kind == "choice_cells":
                 _fill_choice_cells(f, value, put, key, mark)
+            elif f.kind == "checkbox":
+                ctl = _control_of(wb, f)
+                on = _truthy(value, f)
+                controls[ctl.shape_id] = (ctl, on)
+                report.written.append({"key": key, "field": f.id, "cell": f"{f.sheet}!{f.range}",
+                                       "value": on, "control": ctl.shape_id})
             else:
                 if (f.kind == "inline_date" and len(placeholder_dates(f.template or "")) > 1
                         and parse_date(value) is not None):
@@ -349,7 +356,7 @@ def fill(
         raise FillError(f"unknown keys: {report.unknown_keys}")
     if not report.errors:
         try:
-            ooxml.save_with_updates(src, dst, updates)
+            ooxml.save_with_updates(src, dst, updates, controls=list(controls.values()))
         except ooxml.WriteError as e:
             report.errors.append(str(e))
         else:
@@ -442,11 +449,42 @@ def _fill_choice_cells(f: Field, value, put, key: str, mark: str) -> None:
         put(f.sheet, p["cell"], mark if o in sel_n else "□", key, f.id)
 
 
+def _control_of(wb: Workbook, f: Field):
+    sid = f.parts[0].get("control") if f.parts else None
+    for c in wb.sheet(f.sheet).controls:
+        if c.shape_id == sid:
+            return c
+    raise FillError(f"check box {sid!r} not found in sheet {f.sheet!r}")
+
+
+_YES = {"true", "yes", "on", "1", "はい", "有", "あり", "する", "✓", "✔", "レ", "■", "☑", "○", "〇", "済"}
+_NO = {"false", "no", "off", "0", "いいえ", "無", "なし", "しない", "□", "☐"}
+
+
+def _truthy(value, f: Field) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    t = normalize_label(str(value)).lower()
+    if t in _YES or t == normalize_label(f.label).lower():
+        return True
+    if t in _NO:
+        return False
+    raise FillError(f"check box takes true / false (or 「{f.label}」), got {value!r}")
+
+
 def _verify(dst: str, written: list[dict], errors: list[str]) -> bool:
     out = ooxml.load(dst)
     ok = True
     for w in written:
         sname, ref = w["cell"].rsplit("!", 1)
+        if "control" in w:
+            got = any(c.checked for c in out.sheet(sname).controls if c.shape_id == w["control"])
+            if got != w["value"]:
+                ok = False
+                errors.append(f"verify failed at {w['cell']}: check box should be {w['value']}")
+            continue
         got = out.sheet(sname).value(*parse_ref(ref))
         want = w["value"]
         if want == "":

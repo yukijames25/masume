@@ -16,6 +16,7 @@ KIND_JA = {
     "pattern": "書式入り(〒・電話・時刻)",
     "split": "分割欄",
     "digits": "1文字1マス",
+    "checkbox": "チェックボックス",
 }
 
 
@@ -45,6 +46,9 @@ def current_value(sheet, f):
         if all(v in (None, "") for v in vals):
             return None
         return "".join(f"{'' if v is None else v}{p.get('suffix') or ''}" for v, p in zip(vals, f.parts))
+    if f.kind == "checkbox":
+        sid = f.parts[0]["control"] if f.parts else None
+        return True if any(c.shape_id == sid and c.checked for c in sheet.controls) else None
     if f.kind == "choice_cells":
         sel = [p["option"] for p in f.parts if str(at(p["cell"]) or "") in CHECKED_CHARS]
         return sel or None

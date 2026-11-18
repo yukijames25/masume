@@ -89,6 +89,25 @@ class Cell:
 
 
 @dataclass
+class Control:
+    """A form control (チェックボックス) floating over the grid."""
+    shape_id: str
+    kind: str  # CheckBox | Radio | ...
+    r1: int  # 1-based cells under the control's anchor
+    c1: int
+    r2: int
+    c2: int
+    checked: bool
+    prop_part: str  # xl/ctrlProps/ctrlPropN.xml
+    vml_part: str | None = None
+    text: str = ""  # caption drawn by the control itself
+
+    @property
+    def row(self) -> int:
+        return (self.r1 + self.r2) // 2
+
+
+@dataclass
 class Sheet:
     name: str
     path: str  # path inside the zip, e.g. xl/worksheets/sheet1.xml
@@ -96,6 +115,7 @@ class Sheet:
     merges: list[tuple[int, int, int, int]] = field(default_factory=list)
     hidden: bool = False
     locked: list = field(default_factory=list)  # [((r1, c1, r2, c2), reason)]
+    controls: list[Control] = field(default_factory=list)
 
     def lock_reason(self, row: int, col: int) -> str | None:
         for (r1, c1, r2, c2), why in self.locked:
@@ -254,8 +274,10 @@ def load(path: str) -> Workbook:
                 path=spath,
                 hidden=s.get("state", "visible") != "visible",
             )
-            _read_sheet(zf.read(spath), sheet, shared)
+            data = zf.read(spath)
+            _read_sheet(data, sheet, shared)
             _read_tables(zf, names, spath, sheet)
+            _read_controls(zf, names, spath, data, sheet)
             sheets.append(sheet)
         return Workbook(path=path, sheets=sheets, styles=_read_styles(zf))
 
@@ -282,6 +304,80 @@ def _read_tables(zf: zipfile.ZipFile, names: set, spath: str, sheet: Sheet) -> N
             sheet.locked.append(((r1, c1, r1, c2), f"header row of Excel table {t.get('displayName', '')}"))
         if t.get("totalsRowCount", "0") not in ("0", ""):
             sheet.locked.append(((r2, c1, r2, c2), "totals row of an Excel table"))
+
+
+_XDR = "{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}"
+_VML_SHAPE = r'<v:shape\b[^>]*\b(?:id|o:spid)="_x0000_s{sid}"[^>]*>.*?</v:shape>'
+
+
+def _sheet_rels(zf: zipfile.ZipFile, names: set, spath: str) -> dict[str, tuple[str, str]]:
+    d, fn = posixpath.split(spath)
+    rels_path = f"{d}/_rels/{fn}.rels"
+    if rels_path not in names:
+        return {}
+    rels = ET.fromstring(zf.read(rels_path))
+    return {r.get("Id"): (r.get("Type", ""), _resolve(d, r.get("Target", "")))
+            for r in rels.findall("{%s}Relationship" % PKG_RNS)}
+
+
+def _read_controls(zf: zipfile.ZipFile, names: set, spath: str, data: bytes, sheet: Sheet) -> None:
+    """Form-control check boxes (xl/ctrlProps) and their legacy VML twins."""
+    if b"<control" not in data and b":control" not in data:
+        return
+    rels = _sheet_rels(zf, names, spath)
+    vml = next((t for (ty, t) in rels.values() if ty.endswith("/vmlDrawing") and t in names), None)
+    vml_text = zf.read(vml).decode("utf-8", "replace") if vml else ""
+    root = ET.fromstring(data)
+    seen: set[str] = set()
+    for el in root.iter(_N + "control"):
+        sid = el.get("shapeId")
+        rid = el.get("{%s}id" % RNS)
+        anchor = el.find(f"{_N}controlPr/{_N}anchor")
+        if not sid or sid in seen or anchor is None or rid not in rels:
+            continue
+        ty, target = rels[rid]
+        if not ty.endswith("/ctrlProp") or target not in names:
+            continue
+        try:
+            fr, to = anchor.find(_N + "from"), anchor.find(_N + "to")
+            c1, r1 = int(fr.find(_XDR + "col").text) + 1, int(fr.find(_XDR + "row").text) + 1
+            c2, r2 = int(to.find(_XDR + "col").text) + 1, int(to.find(_XDR + "row").text) + 1
+        except (AttributeError, TypeError, ValueError):
+            continue
+        prop = ET.fromstring(zf.read(target))
+        text = ""
+        m = re.search(_VML_SHAPE.format(sid=re.escape(sid)), vml_text, re.S) if vml_text else None
+        if m:
+            div = re.search(r"<v:textbox\b.*?</v:textbox>", m.group(0), re.S)
+            if div:
+                text = re.sub(r"<[^>]+>", "", div.group(0)).strip()
+        seen.add(sid)
+        sheet.controls.append(Control(
+            shape_id=sid, kind=prop.get("objectType", ""), r1=r1, c1=c1, r2=r2, c2=c2,
+            checked=prop.get("checked") == "Checked", prop_part=target,
+            vml_part=vml if m else None, text=decode_x(text)))
+
+
+def set_control_prop(xml: str, checked: bool) -> str:
+    """Tick / untick a <formControlPr> (x14 form control)."""
+    m = re.search(r"<(\w+:)?formControlPr\b[^>]*?(/?)>", xml)
+    if not m:
+        raise WriteError("form control without formControlPr")
+    tag = re.sub(r'\s+checked="[^"]*"', "", m.group(0))
+    if checked:
+        tag = re.sub(r"\s*(/?)>$", r' checked="Checked"\1>', tag)
+    return xml[:m.start()] + tag + xml[m.end():]
+
+
+def set_control_vml(vml: str, shape_id: str, checked: bool) -> str:
+    """Same for the legacy VML copy (<x:Checked>) that older readers use."""
+    m = re.search(_VML_SHAPE.format(sid=re.escape(shape_id)), vml, re.S)
+    if not m:
+        return vml
+    shape = re.sub(r"\s*<x:Checked>[^<]*</x:Checked>", "", m.group(0))
+    if checked:
+        shape = shape.replace("</x:ClientData>", "<x:Checked>1</x:Checked></x:ClientData>", 1)
+    return vml[:m.start()] + shape + vml[m.end():]
 
 
 def _read_sheet(data: bytes, sheet: Sheet, shared: list[str]) -> None:
@@ -582,10 +678,12 @@ def save_with_updates(
     dst: str,
     updates: dict[str, dict[tuple[int, int], object]],
     recalc: bool = True,
+    controls: list[tuple[Control, bool]] | None = None,
 ) -> None:
     """Copy *src* to *dst*, replacing values of cells per sheet path.
 
     updates: { "xl/worksheets/sheet1.xml": {(row, col): value, ...}, ... }
+    controls: [(Control, checked), ...] check boxes to tick or untick
     """
     if os.path.exists(dst) and os.path.samefile(src, dst):
         raise WriteError("output path must differ from the template")
@@ -600,7 +698,15 @@ def save_with_updates(
             if problems:
                 raise WriteError("refusing to write a sheet Excel would reject: " + "; ".join(problems[:3]))
             replaced[spath] = new_xml.encode("utf-8")
-        if recalc and replaced and "xl/workbook.xml" in zin.namelist():
+        for ctl, checked in controls or []:
+            cur = replaced.get(ctl.prop_part) or zin.read(ctl.prop_part)
+            replaced[ctl.prop_part] = set_control_prop(cur.decode("utf-8"), checked).encode("utf-8")
+            if ctl.vml_part:
+                raw = replaced.get(ctl.vml_part) or zin.read(ctl.vml_part)
+                enc = "utf-8" if raw[:200].lower().find(b"windows-1252") < 0 else "cp1252"
+                replaced[ctl.vml_part] = set_control_vml(raw.decode(enc, "replace"), ctl.shape_id,
+                                                         checked).encode(enc, "replace")
+        if recalc and any(k in updates for k in replaced) and "xl/workbook.xml" in zin.namelist():
             replaced["xl/workbook.xml"] = _force_recalc(
                 zin.read("xl/workbook.xml").decode("utf-8")
             ).encode("utf-8")
