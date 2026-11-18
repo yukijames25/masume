@@ -1377,6 +1377,12 @@ const CIRCLE_VOCAB = new Set([
   '普通', '当座', '既婚', '未婚', '持家', '借家', '賛成', '反対', '出席', '欠席',
 ]);
 const FURIGANA = new Set(['ふりがな', 'フリガナ', 'よみがな', 'ヨミガナ']);
+// filled in by the office, not the applicant (受付印, ※市記入欄, 処理欄 ...)
+const RE_OFFICE_USE = /受付印?$|受付番号|受理|記入欄$|処理欄|事務処理|整理番号|記入しないで|使用欄|^宛先$|^あて先$/u;
+// the printed addressee 「広島市長」「〇〇税務署長」 is not a label
+const RE_ADDRESSEE = /(?:市|区|町|村|都|道|府|県|署|所|局|庁)長$|知事$/u;
+const ERA_NAMES = new Set(['令和', '平成', '昭和', '西暦']);
+const sideList = (reg) => [...reg.sides];
 const BRACKET_PAIRS = { '（': '）', '(': ')', '【': '】', '[': ']', '「': '」', '〔': '〕' };
 
 const RE_TRAIL = /[：:＊*※]+(?=\n?$)/u;
@@ -1547,6 +1553,7 @@ function isTemplate(text) {
   if ([...residue].every((ch) => TEMPLATE_CHARS.has(ch))) return true;
   const tokens = stripWS(raw).split(RE_SPACES1).filter((t) => t);
   if (tokens.every((t) => cpLen(t) === 1)) return false; // 均等割付 label such as 「氏　　名」
+  if (tokens.some((t) => /^[（(][^]+[）)]$/u.test(t))) return false; // 「名　　称」+「（氏名）」 two-line label
   return tokens.length >= 2 && tokens.every((t) => cpLen(t) <= 8) && RE_SP3.test(raw);
 }
 const RE_CIRCLE_SEP = /[・･/／]/u;
@@ -1576,14 +1583,22 @@ function isLabel(reg, maxlen = 40) {
   if (isPlaceholderDate(t) || isSymbolTemplate(t) || circleOptions(t)) return false;
   if (RE_NUMERIC_LABEL.test(t)) return false;
   if (isUnit(t)) return false;
+  const nl = normalizeLabel(t);
+  if (RE_OFFICE_USE.test(nl) || RE_ADDRESSEE.test(nl)) return false;
   return true;
+}
+function isFrame(reg) {
+  // a single empty cell carrying one rule line of a larger frame (not a box)
+  if (reg == null || !reg.empty || reg.merged) return false;
+  const sd = sideList(reg).sort().join(',');
+  return sd === 'top' || sd === 'left' || sd === 'right' || sd === 'left,right';
 }
 const RE_CHAPTER = /^第[^\n]{1,3}[章節部]/u;
 function hasHeadingCue(text) {
   const t = stripWS(text);
   return !!t && (HEADING_MARKS.includes(firstCp(t)) || t.startsWith('【') || RE_CHAPTER.test(t));
 }
-function isBox(reg) { return reg != null && reg.empty && (reg.merged || reg.bordered); }
+function isBox(reg) { return reg != null && reg.empty && (reg.merged || reg.bordered) && !isFrame(reg); }
 function dateLikeLabel(label) { return label.endsWith('日') || label.includes('年月日') || label === '日付' || label === '期日'; }
 function rowOf(ref) { return parseInt(ref.replace(/\D/g, ''), 10); }
 function colOf(ref) { return colToIdx(ref.replace(/\d/g, '')); }
@@ -1708,16 +1723,29 @@ function detectSheet(sheet, styles) {
     if (usedLabels.has(lab) && lab.height === 1) continue;
     if (!usedLabels.has(lab) && !labelSet.has(lab)) continue;
     let foundAny = usedLabels.has(lab);
+    let prevCols = null;
     for (let row = lab.r1 + (foundAny ? 1 : 0); row <= lab.r2; row++) {
       const res = scanRight(g, lab, row, claimed, usedLabels);
       if (res === null) continue;
       const [kind, boxes, prefix, suffixes] = res;
+      const cols = boxes.map((b) => `${b.c1}:${b.c2}`).join(',');
       if (row > lab.r1) {
         const above = g.at(boxes[0].r1 - 1, boxes[0].c1);
         if (above !== null && above.r1 >= lab.r1 && isLabel(above)) continue; // 決裁 | 部長 / stamp
+        if (cols === prevCols && !boxes.some((b) => b.sides.has('top') && b.sides.has('bottom'))) {
+          claimed.addAll(boxes);
+          continue; // lower half of the same boxes drawn over two rows (法人番号)
+        }
       }
+      prevCols = cols;
       const label = !foundAny ? lab.text : `${lab.text}(${row - lab.r1 + 1})`;
-      fields.push(makeBoxField(sheet, label, kind, boxes, prefix, suffixes));
+      if (ERA_NAMES.has(normalizeLabel(lab.text)) && kind === 'split' && suffixes[0] === '年') {
+        const f = makeBoxField(sheet, '日付', kind, boxes, prefix, suffixes);
+        f.template = normalizeLabel(lab.text); // 「令和[ ]年[ ]月[ ]日」 split over cells
+        fields.push(f);
+      } else {
+        fields.push(makeBoxField(sheet, label, kind, boxes, prefix, suffixes));
+      }
       claimed.addAll(boxes);
       foundAny = true;
     }
@@ -1759,7 +1787,8 @@ function detectSheet(sheet, styles) {
     if (usedLabels.has(lab) || claimed.has(lab)) continue;
     const right = g.at(lab.r1, lab.c2 + 1);
     if (right === null || right.empty || claimed.has(right) || usedLabels.has(right) || !(right.merged || right.bordered) ||
-        !(isStr(right.value) || isPyNum(right.value)) || g.headingStyled(right) || hasHeadingCue(pyStr(right.value))) continue;
+        !(isStr(right.value) || isPyNum(right.value)) || g.headingStyled(right) || hasHeadingCue(pyStr(right.value)) ||
+        /^[（(][^（(]+[）)]$/u.test(stripWS(pyStr(right.value)))) continue; // 「申請者」+「（特別徴収義務者）」
     if (isStr(right.value) && isLabel(right)) {
       const after = g.at(right.r1, right.c2 + 1);
       if (isBox(after) && !claimed.has(after)) continue; // right is itself a label with its own box
@@ -1769,6 +1798,35 @@ function detectSheet(sheet, styles) {
     const f = makeBoxField(sheet, lab.text, 'text', [right], null, [null]);
     f.value = right.value;
     fields.push(f);
+  }
+
+  // ---- 5b. label inside a ruled frame, value written in the open space right of it
+  for (const lab of labels) {
+    if (usedLabels.has(lab) || claimed.has(lab)) continue;
+    const n = normalizeLabel(lab.text);
+    if (!(cpLen(n) >= 2 && cpLen(n) <= 10) || /[。、，,]/u.test(n) || g.headingStyled(lab)) continue;
+    const upper = g.at(lab.r1 - 1, lab.c1);
+    if (/^[（(]/u.test(lab.text) && upper !== null && usedLabels.has(upper) && upper.c1 === lab.c1 && upper.c2 === lab.c2) {
+      usedLabels.add(lab); // 「所在地」+「（住所）」 on the next line: one label
+      for (const f of fields) if (f.label === upper.text) f.label = upper.text + lab.text;
+      continue;
+    }
+    let c = lab.c2 + 1, free = 0;
+    while (c <= g.maxCol && free < 4) {
+      const reg = g.at(lab.r1, c);
+      if (reg === null || reg.merged || !reg.empty || claimed.has(reg) || (reg.bordered && !isFrame(reg))) break;
+      free += 1;
+      c = reg.c2 + 1;
+    }
+    if (free >= 4) {
+      let box = g.at(lab.r1, lab.c2 + 1);
+      const below = g.at(lab.r2 + 1, lab.c1);
+      if (!lab.merged && below !== null && below.empty && !below.merged && !claimed.has(below) &&
+          !lab.sides.has('bottom') && !below.sides.has('top')) box = below; // unmerged label spills right: write under it
+      claimed.add(box);
+      usedLabels.add(lab);
+      fields.push(makeBoxField(sheet, lab.text, 'text', [box], null, [null]));
+    }
   }
 
   // ---- 6. furigana ids
@@ -1820,9 +1878,18 @@ function scanRight(g, lab, row, claimed, used) {
     if (reg === null || claimed.has(reg)) break;
     if (reg.r1 !== row && !(reg.r1 <= row && row <= reg.r2)) break;
     if (reg.empty) {
-      if (reg.merged || reg.bordered) {
+      const lastBox = boxes.length ? boxes[boxes.length - 1] : null;
+      if (isFrame(reg) && reg.sides.has('right') && lastBox && !lastBox.merged && reg.c1 === lastBox.c2 + 1 &&
+          suffixes[suffixes.length - 1] === null && lastBox.sides.has('right')) {
+        boxes.push(reg); suffixes.push(null); break; // last digit box: its other sides come from neighbours
+      }
+      if ((reg.merged || reg.bordered) && !isFrame(reg)) {
         if (boxes.length && suffixes[suffixes.length - 1] === null && !reg.merged && !boxes[boxes.length - 1].merged) {
           boxes.push(reg); suffixes.push(null); c = reg.c2 + 1; continue; // digits or underline run
+        }
+        if (lastBox && suffixes[suffixes.length - 1] === null && reg.merged && lastBox.merged &&
+            reg.width === lastBox.width && lastBox.width <= 3 && reg.r1 === lastBox.r1 && reg.r2 === lastBox.r2) {
+          boxes.push(reg); suffixes.push(null); c = reg.c2 + 1; continue; // [ ][ ][ ] merged per character
         }
         if (boxes.length && suffixes[suffixes.length - 1] === null) break; // separate fields
         boxes.push(reg); suffixes.push(null); spacer = 0; c = reg.c2 + 1; continue;
@@ -1840,19 +1907,29 @@ function scanRight(g, lab, row, claimed, used) {
       if (suffixes[suffixes.length - 1] === null) { suffixes[suffixes.length - 1] = reg.text; c = reg.c2 + 1; spacer = 0; continue; }
       break;
     }
+    if (boxes.length && suffixes[suffixes.length - 1] === null && isStr(reg.value) &&
+        '年月日'.includes(firstCp(reg.text)) && suffixes.some((x) => x)) {
+      suffixes[suffixes.length - 1] = firstCp(reg.text); // 「[ ]日提出」「[ ]月分（…）」
+      used.add(reg);
+    }
     break;
   }
   if (!boxes.length) return null;
   const singleCells = boxes.filter((b) => !b.merged);
+  const uniform = new Set(boxes.map((b) => `${b.width},${b.r1},${b.r2}`)).size === 1 && boxes[0].width <= 3;
+  if (boxes.length >= 3 && suffixes.every((s) => s === null) && uniform && singleCells.length !== boxes.length) {
+    return ['digits', boxes, prefix, suffixes];
+  }
   if (boxes.length >= 3 && singleCells.length === boxes.length && suffixes.every((s) => s === null)) {
-    const sides = new Set();
-    for (const b of boxes) for (const x of b.sides) sides.add(x);
-    if (sides.has('left') || sides.has('right')) return ['digits', boxes, prefix, suffixes];
+    const vertical = boxes.filter((b) => b.sides.has('left') || b.sides.has('right')).length;
+    if (vertical >= boxes.length - 1) return ['digits', boxes, prefix, suffixes];
     const last = boxes[boxes.length - 1];
     const merged = new Region(boxes[0].r1, boxes[0].c1, last.r2, last.c2, null, false, true);
     return ['underline', [merged, ...boxes.slice(1)], prefix, boxes.map(() => null)];
   }
   if (boxes.length >= 2) return ['split', boxes, prefix, suffixes];
+  const b0 = boxes[0];
+  if (!b0.merged && !b0.sides.has('bottom') && sideList(b0).length < 3) return null; // a corner of a frame
   return ['text', boxes, prefix, suffixes];
 }
 
@@ -1919,12 +1996,17 @@ function groupLabels(g, regions, used, claimed) {
 function assignIds(fields) {
   const base = fields.map((f) => f.id_hint || normalizeLabel(f.label) || f.cell);
   const counts = new Map();
-  for (const b of base) counts.set(b, (counts.get(b) || 0) + 1);
+  const sections = new Map();
+  fields.forEach((f, i) => {
+    counts.set(base[i], (counts.get(base[i]) || 0) + 1);
+    if (!sections.has(base[i])) sections.set(base[i], new Set());
+    sections.get(base[i]).add(f.section ?? null);
+  });
   const seen = new Map();
   fields.forEach((f, i) => {
     const b = base[i];
     let fid = b;
-    if (counts.get(b) > 1 && f.section) fid = `${f.section}/${b}`;
+    if (counts.get(b) > 1 && f.section && sections.get(b).size > 1) fid = `${f.section}/${b}`; // only when it tells them apart
     const n = (seen.get(fid) || 0) + 1;
     seen.set(fid, n);
     if (n > 1) fid = `${fid}#${n}`;
@@ -2314,6 +2396,7 @@ function formatFieldValue(wb, f, value, mark = '■', today = null) {
 }
 
 const RE_DIGIT_STRIP = new RegExp(`[-－ー‐−${WS}　]`, 'gu');
+const ERA_SPLIT = new Set(['令和', '平成', '昭和', '西暦']);
 function fillParts(f, value, put, key) {
   const n = f.parts.length;
   if (f.kind === 'digits') {
@@ -2329,6 +2412,19 @@ function fillParts(f, value, put, key) {
       if (p === undefined) throw new FillError(`この欄にない区切りです: ${pyRepr(k)}（区切り: ${f.parts.map((x) => x.suffix ?? '-').join(', ')}）`);
       put(f.sheet, p.cell, isStr(v) ? num(v) : v, key, f.id);
     }
+    return;
+  }
+  const dt = ERA_SPLIT.has(f.template) ? parseDate(value) : null;
+  if (dt !== null) {
+    // 「令和[ ]年[ ]月[ ]日」 drawn over separate cells
+    let y = dt.y;
+    if (f.template !== '西暦') {
+      const [era, ey] = toWareki(dt);
+      if (era !== f.template) throw new FillError(`${pyRepr(value)} は${era}の日付です（様式は「${f.template}」）`);
+      y = ey;
+    }
+    const nums = { 年: y, 月: dt.m, 日: dt.d };
+    for (const p of f.parts) if (p.suffix in nums) put(f.sheet, p.cell, nums[p.suffix], key, f.id);
     return;
   }
   let parts = splitValue(value, n);

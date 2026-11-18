@@ -388,6 +388,9 @@ def _format_single(f: Field, value, wb: Workbook, mark: str, today):
     return _num(value) if isinstance(value, str) else value
 
 
+_ERA_SPLIT = {"令和", "平成", "昭和", "西暦"}
+
+
 def _fill_parts(f: Field, value, put, key: str) -> None:
     n = len(f.parts)
     if f.kind == "digits":
@@ -404,6 +407,20 @@ def _fill_parts(f: Field, value, put, key: str) -> None:
             if p is None:
                 raise FillError(f"unknown part {k!r} (have {[p.get('suffix') for p in f.parts]})")
             put(f.sheet, p["cell"], _num(v) if isinstance(v, str) else v, key, f.id)
+        return
+    d = parse_date(value) if f.template in _ERA_SPLIT else None
+    if d is not None:
+        # 「令和[ ]年[ ]月[ ]日」 drawn over separate cells
+        if f.template == "西暦":
+            y = d.year
+        else:
+            era, y = to_wareki(d)
+            if era != f.template:
+                raise FillError(f"{value!r} は{era}の日付です（様式は「{f.template}」）")
+        nums = {"年": y, "月": d.month, "日": d.day}
+        for p in f.parts:
+            if p.get("suffix") in nums:
+                put(f.sheet, p["cell"], nums[p["suffix"]], key, f.id)
         return
     parts = _split_value(value, n)
     if len(parts) == 1 and n == 2 and re.fullmatch(r"\d{7}", str(parts[0])):

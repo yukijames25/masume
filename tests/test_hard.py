@@ -218,3 +218,30 @@ class DogfoodRegressionTests(unittest.TestCase):
         self.assertIn("| 現住所 | テキスト | F10:Y10 | [履歴書] 現在値: 東京都千代田区1-1 |", md)
         self.assertIn("1行記入済み", md)
         self.assertIn("現在値: 男 ・ （女）", md)
+
+
+class RealFormLayoutTests(unittest.TestCase):
+    """Layout habits seen in real municipal forms (made-up copy: make_frame_fixture.py)."""
+
+    path = os.path.join(FX, "frame_todoke.xlsx")
+
+    def test_fields(self):
+        f = {x.id: x for x in detect(load(self.path))}
+        self.assertEqual(set(f), {"名称（氏名）", "担当者名", "所在地（住所）", "日付", "法人番号"})
+        self.assertEqual(f["所在地（住所）"].cell, "O5")      # open space inside the frame
+        self.assertEqual(f["担当者名"].cell, "K13")           # under an unmerged label, not over it
+        self.assertEqual(len(f["法人番号"].parts), 13)
+        self.assertEqual(f["日付"].template, "令和")
+
+    def test_fill_era_split_date(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            out = os.path.join(tmp, "o.xlsx")
+            rep = fill(self.path, out, {"日付": "2026-11-19", "法人番号": "1234567890123", "担当者名": "山田"})
+            self.assertEqual(rep.errors, [])
+            sh = load(out).sheet("届出書")
+            self.assertEqual([sh.value(15, c) for c in (4, 7, 10)], [8, 11, 19])
+            rep = fill(self.path, os.path.join(tmp, "p.xlsx"), {"日付": "2018-01-01"})
+            self.assertTrue(rep.errors)  # 平成 date into a 令和 form is an error, not a wrong year
+        finally:
+            shutil.rmtree(tmp)

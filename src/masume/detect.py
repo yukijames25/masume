@@ -59,6 +59,11 @@ CIRCLE_VOCAB = {
     "普通", "当座", "既婚", "未婚", "持家", "借家", "賛成", "反対", "出席", "欠席",
 }
 _FURIGANA = {"ふりがな", "フリガナ", "よみがな", "ヨミガナ"}
+# filled in by the office, not the applicant (受付印, ※市記入欄, 処理欄 ...)
+_OFFICE_USE = re.compile(r"受付印?$|受付番号|受理|記入欄$|処理欄|事務処理|整理番号|記入しないで|使用欄|^宛先$|^あて先$")
+# the printed addressee 「広島市長」「〇〇税務署長」 is not a label
+_ADDRESSEE = re.compile(r"(?:市|区|町|村|都|道|府|県|署|所|局|庁)長$|知事$")
+_ERA_NAMES = {"令和", "平成", "昭和", "西暦"}
 
 
 def normalize_label(text: str) -> str:
@@ -279,6 +284,8 @@ def is_template(text: str) -> bool:
     tokens = [t for t in _SPACES.split(raw.strip()) if t]
     if all(len(t) == 1 for t in tokens):
         return False  # 均等割付 label such as 「氏　　名」
+    if any(re.fullmatch(r"[（(].+[）)]", t) for t in tokens):
+        return False  # 「名　　称」+「（氏名）」 is a two-line label
     return len(tokens) >= 2 and all(len(t) <= 8 for t in tokens) and bool(re.search(r"[\s　]{3,}", raw))
 
 
@@ -317,7 +324,16 @@ def is_label(reg: Region, maxlen: int = 40) -> bool:
         return False
     if is_unit(t):
         return False
+    n = normalize_label(t)
+    if _OFFICE_USE.search(n) or _ADDRESSEE.search(n):
+        return False
     return True
+
+
+def is_frame(reg: Region | None) -> bool:
+    """A single empty cell carrying one rule line of a larger frame (not a box)."""
+    return (reg is not None and reg.empty and not reg.merged and bool(reg.sides)
+            and reg.sides in ({"top"}, {"left"}, {"right"}, {"left", "right"}))
 
 
 def has_heading_cue(text: str) -> bool:
@@ -326,7 +342,7 @@ def has_heading_cue(text: str) -> bool:
 
 
 def _is_box(reg: Region | None) -> bool:
-    return reg is not None and reg.empty and (reg.merged or reg.bordered)
+    return reg is not None and reg.empty and (reg.merged or reg.bordered) and not is_frame(reg)
 
 
 def _date_like_label(label: str) -> bool:
@@ -469,17 +485,27 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
         if lab not in used_labels and lab not in labels:
             continue
         found_any = lab in used_labels
+        prev_cols = None
         for row in range(lab.r1 + (1 if found_any else 0), lab.r2 + 1):
             res = _scan_right(g, lab, row, claimed, used_labels)
             if res is None:
                 continue
             kind, boxes, prefix, suffixes = res
+            cols = [(b.c1, b.c2) for b in boxes]
             if row > lab.r1:
                 above = g.at(boxes[0].r1 - 1, boxes[0].c1)
                 if above is not None and above.r1 >= lab.r1 and is_label(above):
                     continue  # box belongs to the header above it (決裁 | 部長 / stamp)
+                if cols == prev_cols and not any("top" in b.sides and "bottom" in b.sides for b in boxes):
+                    claimed.update(boxes)
+                    continue  # lower half of the same boxes drawn over two rows (法人番号)
+            prev_cols = cols
             label = lab.text if not found_any else f"{lab.text}({row - lab.r1 + 1})"
-            f = _make_box_field(sheet, label, kind, boxes, prefix, suffixes)
+            if normalize_label(lab.text) in _ERA_NAMES and kind == "split" and suffixes[0] == "年":
+                f = _make_box_field(sheet, "日付", kind, boxes, prefix, suffixes)
+                f.template = normalize_label(lab.text)  # 「令和[ ]年[ ]月[ ]日」 split over cells
+            else:
+                f = _make_box_field(sheet, label, kind, boxes, prefix, suffixes)
             fields.append(f)
             claimed.update(boxes)
             found_any = True
@@ -522,8 +548,9 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
         right = g.at(lab.r1, lab.c2 + 1)
         if (right is None or right.empty or right in claimed or right in used_labels
                 or not (right.merged or right.bordered) or not isinstance(right.value, (str, int, float))
-                or g.heading_styled(right) or has_heading_cue(str(right.value))):
-            continue
+                or g.heading_styled(right) or has_heading_cue(str(right.value))
+                or re.fullmatch(r"[（(][^（(]+[）)]", str(right.value).strip())):
+            continue  # 「申請者」+「（特別徴収義務者）」 is one label, not a filled value
         if isinstance(right.value, str) and is_label(right):
             after = g.at(right.r1, right.c2 + 1)
             if _is_box(after) and after not in claimed:
@@ -533,6 +560,39 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
         f = _make_box_field(sheet, lab.text, "text", [right], None, [None])
         f.value = right.value
         fields.append(f)
+
+    # ---- 5b. label inside a ruled frame, value written in the open space right of it ----
+    for lab in labels:
+        if lab in used_labels or lab in claimed:
+            continue
+        n = normalize_label(lab.text)
+        if not 2 <= len(n) <= 10 or re.search(r"[。、，,]", n) or g.heading_styled(lab):
+            continue
+        upper = g.at(lab.r1 - 1, lab.c1)
+        if (lab.text.strip()[:1] in "（(" and upper is not None and upper in used_labels
+                and (upper.c1, upper.c2) == (lab.c1, lab.c2)):
+            used_labels.add(lab)  # 「所在地」+「（住所）」 on the next line: one label
+            for f in fields:
+                if f.label == upper.text:
+                    f.label = upper.text + lab.text
+            continue
+        c, free = lab.c2 + 1, 0
+        while c <= g.max_col and free < 4:
+            reg = g.at(lab.r1, c)
+            if reg is None or reg.merged or not reg.empty or reg in claimed or (
+                    reg.bordered and not is_frame(reg)):
+                break
+            free += 1
+            c = reg.c2 + 1
+        if free >= 4:
+            box = g.at(lab.r1, lab.c2 + 1)
+            below = g.at(lab.r2 + 1, lab.c1)
+            if (not lab.merged and below is not None and below.empty and not below.merged
+                    and below not in claimed and "bottom" not in lab.sides and "top" not in below.sides):
+                box = below  # an unmerged label spills over the cells to its right: write under it
+            claimed.add(box)
+            used_labels.add(lab)
+            fields.append(_make_box_field(sheet, lab.text, "text", [box], None, [None]))
 
     # ---- 6. furigana ids ----------------------------------------------------
     for f in fields:
@@ -592,10 +652,22 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set):
         if reg.r1 != row and not (reg.r1 <= row <= reg.r2):
             break
         if reg.empty:
-            if reg.merged or reg.bordered:
+            if (is_frame(reg) and "right" in reg.sides and boxes and not boxes[-1].merged
+                    and reg.c1 == boxes[-1].c2 + 1
+                    and suffixes[-1] is None and "right" in boxes[-1].sides):
+                boxes.append(reg)  # last digit box: its other sides come from neighbours
+                suffixes.append(None)
+                break
+            if (reg.merged or reg.bordered) and not is_frame(reg):
                 if boxes and suffixes[-1] is None and not reg.merged and not boxes[-1].merged:
                     # adjacent single cells: digits or underline run
                     boxes.append(reg)
+                    suffixes.append(None)
+                    c = reg.c2 + 1
+                    continue
+                if (boxes and suffixes[-1] is None and reg.merged and boxes[-1].merged
+                        and reg.width == boxes[-1].width <= 3 and (reg.r1, reg.r2) == (boxes[-1].r1, boxes[-1].r2)):
+                    boxes.append(reg)  # [ ][ ][ ] merged per character
                     suffixes.append(None)
                     c = reg.c2 + 1
                     continue
@@ -626,20 +698,30 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set):
                 spacer = 0
                 continue
             break
+        if (boxes and suffixes[-1] is None and isinstance(reg.value, str)
+                and reg.text[:1] in "年月日" and len(boxes) >= 1 and any(suffixes)):
+            suffixes[-1] = reg.text[:1]  # 「[ ]日提出」「[ ]月分（…）」
+            used.add(reg)
         break
     if not boxes:
         return None
     # trim trailing boxes that are not followed by a unit when we have a split
     single_cells = [b for b in boxes if not b.merged]
+    uniform = len({(b.width, b.r1, b.r2) for b in boxes}) == 1 and boxes[0].width <= 3
+    if len(boxes) >= 3 and all(s is None for s in suffixes) and uniform and len(single_cells) != len(boxes):
+        return "digits", boxes, prefix, suffixes
     if len(boxes) >= 3 and len(single_cells) == len(boxes) and all(s is None for s in suffixes):
-        sides = set().union(*(b.sides for b in boxes))
-        if {"left", "right"} & sides:
+        vertical = sum(1 for b in boxes if {"left", "right"} & b.sides)
+        if vertical >= len(boxes) - 1:
             return "digits", boxes, prefix, suffixes
         # underline drawn on unmerged cells -> one logical box
         merged = Region(boxes[0].r1, boxes[0].c1, boxes[-1].r2, boxes[-1].c2, None, False, True)
         return "underline", [merged] + boxes[1:], prefix, [None] * len(boxes)
     if len(boxes) >= 2:
         return "split", boxes, prefix, suffixes
+    b = boxes[0]
+    if not b.merged and "bottom" not in b.sides and len(b.sides) < 3:
+        return None  # a corner of a frame, not a box
     return "text", boxes, prefix, suffixes
 
 
@@ -729,13 +811,15 @@ def _group_labels(g: Grid, regions: Iterable[Region], used: set[Region], claimed
 def _assign_ids(fields: list[Field]) -> None:
     base = [f.id_hint or normalize_label(f.label) or f.cell for f in fields]
     counts: dict[str, int] = {}
-    for b in base:
+    sections: dict[str, set] = {}
+    for f, b in zip(fields, base):
         counts[b] = counts.get(b, 0) + 1
+        sections.setdefault(b, set()).add(f.section)
     seen: dict[str, int] = {}
     for f, b in zip(fields, base):
         fid = b
-        if counts[b] > 1 and f.section:
-            fid = f"{f.section}/{b}"
+        if counts[b] > 1 and f.section and len(sections[b]) > 1:
+            fid = f"{f.section}/{b}"  # only when the section tells the duplicates apart
         n = seen.get(fid, 0) + 1
         seen[fid] = n
         if n > 1:
