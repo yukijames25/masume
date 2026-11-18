@@ -1687,7 +1687,7 @@ const RE_CHAPTER = /^第[^\n]{1,3}[章節部]/u;
 function hasHeadingCue(text) {
   const t = stripWS(text);
   return !!t && (HEADING_MARKS.includes(firstCp(t)) || t.startsWith('【') || RE_CHAPTER.test(t) ||
-    /^[0-9０-９]{1,2}[\s　]+\S/u.test(t)); // 「１　変更理由等」
+    (/^[0-9０-９]{1,2}[\s　]+\S/u.test(t) && cpLen(t.replace(RE_SPACES, '')) >= 6)); // 「１　変更理由等」, not 「１　氏名」
 }
 function isBox(reg) { return reg != null && reg.empty && (reg.merged || reg.bordered) && !isFrame(reg); }
 function dateLikeLabel(label) { return label.endsWith('日') || label.includes('年月日') || label === '日付' || label === '期日'; }
@@ -1897,8 +1897,18 @@ function detectSheet(sheet, styles) {
 
   // ---- 5. filled forms: label -> non-empty box on the right
   for (const lab of labels) {
-    if (usedLabels.has(lab) || claimed.has(lab)) continue;
+    if (usedLabels.has(lab) || claimed.has(lab) || isSentence(lab.text)) continue;
     const right = g.at(lab.r1, lab.c2 + 1);
+    if (right !== null && BOX_PREFIXES.has(right.text) && right.merged && !claimed.has(right) && !usedLabels.has(right)) {
+      // an address box with 〒 printed in its corner: the value is written after the mark
+      claimed.add(right);
+      usedLabels.add(lab);
+      const f = makeBoxField(sheet, lab.text, 'text', [right], null, [null]);
+      f.template = right.text;
+      fields.push(f);
+      continue;
+    }
+    if (right !== null && isStr(right.value) && isPrinted(right.text)) continue;
     if (right === null || right.empty || claimed.has(right) || usedLabels.has(right) || !(right.merged || right.bordered) ||
         !(isStr(right.value) || isPyNum(right.value)) || g.headingStyled(right) || hasHeadingCue(pyStr(right.value)) ||
         /^[（(][^（(]+[）)]$/u.test(stripWS(pyStr(right.value)))) continue; // 「申請者」+「（特別徴収義務者）」
@@ -2054,6 +2064,19 @@ function scanRight(g, lab, row, claimed, used, stopCol = null) {
   const b0 = boxes[0];
   if (!b0.merged && !b0.sides.has('bottom') && sideList(b0).length < 3) return null; // a corner of a frame
   return ['text', boxes, prefix, suffixes];
+}
+
+const BOX_PREFIXES = new Set(['〒']);
+/** Instructions and notes 「…してください。」「←…記載」, not field labels. */
+function isSentence(t) {
+  t = stripWS(t);
+  return t.endsWith('。') || t.endsWith('、') || t.includes('ください') || t.startsWith('←') || t.startsWith('→') || t.startsWith('※') || cpLen(t) > 40;
+}
+/** Text the form itself prints: 均等割付 「一　括　徴　収」, multi-line captions, sentences. */
+function isPrinted(t) {
+  if (t.includes('\n') || isSentence(t)) return true;
+  const tokens = stripWS(t).split(RE_SPACES1).filter((x) => x);
+  return tokens.length >= 3 && tokens.every((x) => cpLen(x) === 1);
 }
 
 /**
@@ -2247,7 +2270,7 @@ function headings(g, regions, used, claimed) {
 function groupLabels(g, regions, used, claimed) {
   const out = [];
   for (const reg of regions) {
-    if (used.has(reg) || claimed.has(reg) || !isLabel(reg) || reg.height < 3 || reg.width > 4) continue;
+    if (used.has(reg) || claimed.has(reg) || !isLabel(reg) || reg.height < 3 || reg.width > 4 || isSentence(reg.text)) continue;
     out.push([reg, normalizeLabel(reg.text)]);
   }
   return out;
@@ -2651,6 +2674,10 @@ function formatFieldValue(wb, f, value, mark = '■', today = null) {
   if (f.kind === 'circle') return formatCircle(f.template || '', f.options, value);
   if (f.kind === 'inline_text') return formatInline(f.template || '', value);
   if (f.kind === 'pattern') return formatPattern(f.template || '', value);
+  if (f.kind === 'text' && f.template && (isStr(value) || (isPyNum(value) && Number.isInteger(Number(value))))) {
+    const v = pyStr(value);
+    return v.startsWith(f.template) ? v : f.template + v; // keep the printed 〒
+  }
   return isStr(value) ? num(value) : value;
 }
 
@@ -2932,7 +2959,7 @@ function currentValue(sheet, f) {
     return sel.length ? sel : null;
   }
   const v = at(f.cell);
-  if (['inline_date', 'pattern', 'inline_text', 'choice', 'circle'].includes(f.kind) && v === f.template) return null; // still the printed placeholder
+  if (['inline_date', 'pattern', 'inline_text', 'choice', 'circle', 'text'].includes(f.kind) && f.template && v === f.template) return null; // still the printed placeholder
   return v;
 }
 /** With *fields* (saved before filling) ids stay stable and current values are shown. */

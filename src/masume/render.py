@@ -53,7 +53,7 @@ def current_value(sheet, f):
         sel = [p["option"] for p in f.parts if str(at(p["cell"]) or "") in CHECKED_CHARS]
         return sel or None
     v = at(f.cell)
-    if f.kind in ("inline_date", "pattern", "inline_text", "choice", "circle") and v == f.template:
+    if f.kind in ("inline_date", "pattern", "inline_text", "choice", "circle", "text") and f.template and v == f.template:
         return None  # still the printed placeholder
     return v
 

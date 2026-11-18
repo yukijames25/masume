@@ -392,6 +392,9 @@ def _format_single(f: Field, value, wb: Workbook, mark: str, today):
         return format_inline(f.template or "", value)
     if f.kind == "pattern":
         return format_pattern(f.template or "", value)
+    if f.kind == "text" and f.template and isinstance(value, (str, int)):
+        v = str(value)
+        return v if v.startswith(f.template) else f.template + v  # keep the printed 〒
     return _num(value) if isinstance(value, str) else value
 
 

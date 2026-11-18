@@ -341,7 +341,8 @@ def is_frame(reg: Region | None) -> bool:
 def has_heading_cue(text: str) -> bool:
     t = text.strip()
     return bool(t) and (t[0] in HEADING_MARKS or t.startswith("【") or bool(re.match(r"^第.{1,3}[章節部]", t))
-                        or bool(re.match(r"^[0-9０-９]{1,2}[\s　]+\S", t)))  # 「１　変更理由等」
+                        or bool(re.match(r"^[0-9０-９]{1,2}[\s　]+\S", t) and len(_SPACES.sub("", t)) >= 6))
+    # 「１　変更理由等」 is a numbered heading; 「１　氏名」 stays a label
 
 
 def _is_box(reg: Region | None) -> bool:
@@ -571,9 +572,20 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
 
     # ---- 5. filled forms: label -> non-empty box on the right --------------
     for lab in labels:
-        if lab in used_labels or lab in claimed:
+        if lab in used_labels or lab in claimed or _is_sentence(lab.text):
             continue
         right = g.at(lab.r1, lab.c2 + 1)
+        if (right is not None and right.text in _BOX_PREFIXES and right.merged and right not in claimed
+                and right not in used_labels):
+            # an address box with 〒 printed in its corner: the value is written after the mark
+            claimed.add(right)
+            used_labels.add(lab)
+            f = _make_box_field(sheet, lab.text, "text", [right], None, [None])
+            f.template = right.text
+            fields.append(f)
+            continue
+        if right is not None and isinstance(right.value, str) and _is_printed(right.text):
+            continue
         if (right is None or right.empty or right in claimed or right in used_labels
                 or not (right.merged or right.bordered) or not isinstance(right.value, (str, int, float))
                 or g.heading_styled(right) or has_heading_cue(str(right.value))
@@ -761,6 +773,23 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set, stop_co
     if not b.merged and "bottom" not in b.sides and len(b.sides) < 3:
         return None  # a corner of a frame, not a box
     return "text", boxes, prefix, suffixes
+
+
+_BOX_PREFIXES = {"〒"}
+
+
+def _is_sentence(t: str) -> bool:
+    """Instructions and notes 「…してください。」「←…記載」, not field labels."""
+    t = t.strip()
+    return t.endswith(("。", "、")) or "ください" in t or t.startswith(("←", "→", "※")) or len(t) > 40
+
+
+def _is_printed(t: str) -> bool:
+    """Text the form itself prints: 均等割付 「一　括　徴　収」, multi-line captions, sentences."""
+    if "\n" in t or _is_sentence(t):
+        return True
+    tokens = [x for x in _SPACES.split(t.strip()) if x]
+    return len(tokens) >= 3 and all(len(x) == 1 for x in tokens)
 
 
 def _comparison_fields(g: Grid, sheet: Sheet, regions: list[Region], used: set, claimed: set) -> list[Field]:
@@ -986,7 +1015,7 @@ def _group_labels(g: Grid, regions: Iterable[Region], used: set[Region], claimed
     """Tall, narrow labels on the left (縦書き 請求者 / 必要な方) act as sections."""
     out = []
     for reg in regions:
-        if reg in used or reg in claimed or not is_label(reg) or reg.height < 3 or reg.width > 4:
+        if reg in used or reg in claimed or not is_label(reg) or reg.height < 3 or reg.width > 4 or _is_sentence(reg.text):
             continue
         out.append((reg, normalize_label(reg.text)))
     return out
