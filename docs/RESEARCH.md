@@ -17,7 +17,20 @@
 | Excel方眼紙→Markdown（**読む**） | MarkItDown、xlsx2md（ブラウザ版）、ExStruct、Aspose、Nutrient など | 競合あり |
 | 汎用Excel MCP | negokaz、sbroenne、SuperPyonchiX、openpyxl系など多数 | レッド |
 | `{{変数}}` 差し込み型テンプレ記入 | elysiatools の xlsx template filler 等。ただし**テンプレの事前加工が前提** | 一部競合 |
-| **無加工の方眼紙フォームにAIが「書く」** | 検索した範囲では、ラベルから入力欄を自動で見つけて非破壊で書き戻すものは見当たらなかった | **空白地帯** |
+| **無加工の方眼紙フォームにAIが「書く」** | ラベルから入力欄を自動で見つけて非破壊で書き戻す**再利用できるツール**は見当たらなかった（下の「追加調査」を参照） | **空白地帯（需要は確認済み）** |
+
+### 追加調査（2026-11-19 04:15）
+
+より近いものが2つ見つかった。どちらもツールとしての競合ではなく、**需要があることの裏付け**と判断した。
+
+- [AIで申請書を自動で記入しよう！ #ClaudeCode（Qiita, 2026-06-23）](https://qiita.com/barcarunrun/items/42c0d8e30ef638af2a61)
+  - Claude Code に方眼紙のセル一覧を出させてMarkdownテンプレートを作り、openpyxl で書き戻す**手順の記事**。ライブラリではない
+  - 欄の自動検出、和暦・□・〒の扱い、図形や画像の保持はない
+  - → 「AIに申請書を書かせたい」需要はすでにあり、masume はその手順を道具にしたもの
+- [engchina/no.1-production-ready-suite PR #2520（2026-10-19 マージ）](https://github.com/engchina/no.1-production-ready-suite/pull/2520)
+  - RAG の前処理として、方眼紙のラベルと値を点数で組にする**読み取り専用**の機能。大きなアプリの一部で、未リリース
+  - → 検出の発想は近いが、書き込みと日本の様式の扱いはない
+- PyPI に `masume` という名前のパッケージは見当たらなかった（公開直前に再確認）
 
 ## 結論: 「masume（升目）」
 
