@@ -150,6 +150,7 @@ class FillTests(unittest.TestCase):
             "休暇の種類": "代休", "開始日": "2026-12-01", "備考": "なし",
         })
         self.assertTrue(rep.to_dict()["ok"], rep.to_dict())
+        self.assertTrue(rep.verified)
         wb = load(out)
         s = wb.sheet()
         self.assertEqual(s.value(5, 20), "令和8年11月19日")

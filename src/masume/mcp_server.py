@@ -78,6 +78,11 @@ TOOLS = [
                 "output_path": {"type": "string", "description": "Where to save (default: <name>_filled.xlsx)"},
                 "sheet": {"type": "string"},
                 "mark": {"type": "string", "default": "■", "description": "Mark for checked boxes"},
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Optional corrected field list (inspect_form's 'fields'); skips auto-detection",
+                },
             },
             "required": ["path", "values"],
         },
@@ -122,7 +127,12 @@ def call_tool(name: str, args: dict) -> dict:
             out = f"{root}_filled{ext or '.xlsx'}"
         if os.path.abspath(out) == os.path.abspath(path):
             return _error("output_path must differ from the template path")
-        rep = fill(path, out, values, sheet=args.get("sheet"), mark=args.get("mark") or "■")
+        fields = None
+        if isinstance(args.get("fields"), list):
+            from .detect import Field
+
+            fields = [Field.from_dict(d) for d in args["fields"]]
+        rep = fill(path, out, values, sheet=args.get("sheet"), mark=args.get("mark") or "■", fields=fields)
         d = rep.to_dict()
         d["output_path"] = out if not rep.errors else None
         res = _text(d)

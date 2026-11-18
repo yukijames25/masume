@@ -20,9 +20,11 @@ class FillReport:
     unknown_keys: list[str] = field(default_factory=list)
     unfilled: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    verified: bool | None = None  # every written value read back from the saved file
 
     def to_dict(self) -> dict:
         return {
+            "verified": self.verified,
             "written": self.written,
             "unknown_keys": self.unknown_keys,
             "unfilled": self.unfilled,
@@ -183,7 +185,24 @@ def fill(
             ooxml.save_with_updates(src, dst, updates)
         except ooxml.WriteError as e:
             report.errors.append(str(e))
+        else:
+            report.verified = _verify(dst, report.written, report.errors)
     return report
+
+
+def _verify(dst: str, written: list[dict], errors: list[str]) -> bool:
+    out = ooxml.load(dst)
+    ok = True
+    for w in written:
+        sname, ref = w["cell"].rsplit("!", 1)
+        got = out.sheet(sname).value(*parse_ref(ref))
+        want = w["value"]
+        if want == "":
+            want = None
+        if got != want and not (isinstance(want, float) and isinstance(got, (int, float)) and abs(got - want) < 1e-9):
+            ok = False
+            errors.append(f"verify failed at {w['cell']}: wrote {want!r}, read {got!r}")
+    return ok
 
 
 def _fill_table(f: Field, value, put, key: str) -> None:
