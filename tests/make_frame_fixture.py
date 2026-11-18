@@ -55,6 +55,11 @@ def build(path):
     ws.merge_cells("F17:P18"); ws["F17"] = "〒"
     for c in range(6, 17):
         side(ws, 17, c, top=T); side(ws, 18, c, bottom=T)
+    # 「変更年月日」 with [ ]年[ ]月[ ]日 in the row under it
+    ws.merge_cells("R20:AA20"); ws["R20"] = "変更年月日"
+    for rng in ("R21:T21", "V21:W21", "Y21:Z21"):
+        ws.merge_cells(rng)
+    ws["U21"] = "年"; ws["X21"] = "月"; ws["AA21"] = "日"
     # big frame J4:AD13, labels inside, values in the open space
     for c in range(10, 31):
         side(ws, 4, c, top=T); side(ws, 13, c, bottom=T)

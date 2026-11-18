@@ -334,7 +334,7 @@ def fill(
             if f.kind == "table":
                 _fill_table(f, value, put, key)
             elif f.kind in ("split", "digits"):
-                _fill_parts(f, value, put, key)
+                _fill_parts(f, value, put, key, wareki=f.template == "日付" and _uses_wareki(wb, f.sheet))
             elif f.kind == "choice_cells":
                 _fill_choice_cells(f, value, put, key, mark)
             elif f.kind == "checkbox":
@@ -401,7 +401,7 @@ def _format_single(f: Field, value, wb: Workbook, mark: str, today):
 _ERA_SPLIT = {"令和", "平成", "昭和", "西暦"}
 
 
-def _fill_parts(f: Field, value, put, key: str) -> None:
+def _fill_parts(f: Field, value, put, key: str, wareki: bool = False) -> None:
     n = len(f.parts)
     if f.kind == "digits":
         chars = list(value) if isinstance(value, (list, tuple)) else list(re.sub(r"[-－ー‐−\s　]", "", str(value)))
@@ -418,11 +418,13 @@ def _fill_parts(f: Field, value, put, key: str) -> None:
                 raise FillError(f"unknown part {k!r} (have {[p.get('suffix') for p in f.parts]})")
             put(f.sheet, p["cell"], _num(v) if isinstance(v, str) else v, key, f.id)
         return
-    d = parse_date(value) if f.template in _ERA_SPLIT else None
+    d = parse_date(value) if f.template in _ERA_SPLIT or f.template == "日付" else None
     if d is not None:
-        # 「令和[ ]年[ ]月[ ]日」 drawn over separate cells
-        if f.template == "西暦":
+        # 「令和[ ]年[ ]月[ ]日」 drawn over separate cells; 「日付」: no era printed
+        if f.template == "西暦" or (f.template == "日付" and not wareki):
             y = d.year
+        elif f.template == "日付":
+            y = to_wareki(d)[1]
         else:
             era, y = to_wareki(d)
             if era != f.template:

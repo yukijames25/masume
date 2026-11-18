@@ -217,6 +217,7 @@ const fillCases = [
     expect: { '届出書!D15': 8, '届出書!G15': 11, '届出書!J15': 19, '届出書!O12': '山田' } },
   { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: '2018-01-01' }, errors: true },
   { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 送付先: '730-0011 広島市中区' }, expect: { '届出書!F17': '〒730-0011 広島市中区' } },
+  { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 変更年月日: '2026-12-01' }, expect: { '届出書!R21': 8, '届出書!V21': 12, '届出書!Y21': 1 } },
   { src: 'tests/fixtures_hard/checkbox_controls.xlsx', data: { '名称変更/社名変更': true, '名称変更/法人成り': false, '所在地変更/その他': 'はい', 氏名: '山田' },
     expect: { '変更届!F8': '山田' } },
   { src: 'tests/fixtures_hard/checkbox_controls.xlsx', data: { '名称変更/社名変更': 'たぶん' }, errors: true },

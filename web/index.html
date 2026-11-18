@@ -1875,6 +1875,20 @@ function detectSheet(sheet, styles) {
     usedLabels.add(lab);
   }
 
+  // ---- 3d. 「変更年月日」 with [ ]年[ ]月[ ]日 in the row under it
+  for (const lab of regions.filter((r) => freeLabel(r) && dateLikeLabel(normalizeLabel(r.text)))) {
+    const row = lab.r2 + 1;
+    const edge = new Region(row, lab.c1 - 1, row, lab.c1 - 1, null, false, false);
+    const res = scanRight(g, edge, row, claimed, usedLabels, lab.c2);
+    if (res === null || res[0] !== 'split' || res[3][0] !== '年' || res[3][1] !== '月') continue;
+    const [kind, boxes, prefix, suffixes] = res;
+    const f = makeBoxField(sheet, lab.text, kind, boxes, prefix, suffixes);
+    f.template = '日付'; // fill takes a date; the year is 和暦 when the sheet uses 和暦
+    fields.push(f);
+    claimed.addAll(boxes);
+    usedLabels.add(lab);
+  }
+
   // ---- 3b. [box] 御中 / 様 / 殿
   for (const reg of regions) {
     if (reg.empty || !isStr(reg.value) || !HONORIFICS.has(reg.text)) continue;
@@ -2023,6 +2037,10 @@ function scanRight(g, lab, row, claimed, used, stopCol = null) {
         if (lastBox && suffixes[suffixes.length - 1] === null && reg.merged && lastBox.merged &&
             reg.width === lastBox.width && lastBox.width <= 6 && reg.r1 === lastBox.r1 && reg.r2 === lastBox.r2) {
           boxes.push(reg); suffixes.push(null); c = reg.c2 + 1; continue; // [ ][ ][ ] merged per character
+        }
+        if (lastBox && suffixes[suffixes.length - 1] === null && reg.merged && lastBox.merged &&
+            !reg.sides.has('left') && !lastBox.sides.has('right') && reg.r1 === lastBox.r1 && reg.r2 === lastBox.r2) {
+          c = reg.c2 + 1; continue; // no line between them: the same box drawn as two merged cells
         }
         if (boxes.length && suffixes[suffixes.length - 1] === null) break; // separate fields
         boxes.push(reg); suffixes.push(null); spacer = 0; c = reg.c2 + 1; continue;
@@ -2685,7 +2703,7 @@ function formatFieldValue(wb, f, value, mark = '■', today = null) {
 
 const RE_DIGIT_STRIP = new RegExp(`[-－ー‐−${WS}　]`, 'gu');
 const ERA_SPLIT = new Set(['令和', '平成', '昭和', '西暦']);
-function fillParts(f, value, put, key) {
+function fillParts(f, value, put, key, wareki = false) {
   const n = f.parts.length;
   if (f.kind === 'digits') {
     const chars = Array.isArray(value) ? value.slice() : Array.from(pyStr(value).replace(RE_DIGIT_STRIP, ''));
@@ -2702,11 +2720,11 @@ function fillParts(f, value, put, key) {
     }
     return;
   }
-  const dt = ERA_SPLIT.has(f.template) ? parseDate(value) : null;
+  const dt = ERA_SPLIT.has(f.template) || f.template === '日付' ? parseDate(value) : null;
   if (dt !== null) {
-    // 「令和[ ]年[ ]月[ ]日」 drawn over separate cells
+    // 「令和[ ]年[ ]月[ ]日」 drawn over separate cells; 「日付」: no era printed
     let y = dt.y;
-    if (f.template !== '西暦') {
+    if (f.template === '日付') { if (wareki) y = toWareki(dt)[1]; } else if (f.template !== '西暦') {
       const [era, ey] = toWareki(dt);
       if (era !== f.template) throw new FillError(`${pyRepr(value)} は${era}の日付です（様式は「${f.template}」）`);
       y = ey;
@@ -2867,7 +2885,7 @@ async function fill(wb, data, opts = {}) {
     touched.add(f.id);
     try {
       if (f.kind === 'table') fillTable(f, value, put, key);
-      else if (f.kind === 'split' || f.kind === 'digits') fillParts(f, value, put, key);
+      else if (f.kind === 'split' || f.kind === 'digits') fillParts(f, value, put, key, f.template === '日付' && usesWareki(wb, f.sheet));
       else if (f.kind === 'choice_cells') fillChoiceCells(f, value, put, key, mark);
       else if (f.kind === 'checkbox') {
         const ctl = controlOf(wb, f);

@@ -551,6 +551,20 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
         claimed.update(boxes)
         used_labels.add(lab)
 
+    # ---- 3d. 「変更年月日」 with [ ]年[ ]月[ ]日 in the row under it ------------
+    for lab in [r for r in regions if free_label(r) and _date_like_label(normalize_label(r.text))]:
+        row = lab.r2 + 1
+        edge = Region(row, lab.c1 - 1, row, lab.c1 - 1, None, False, False)
+        res = _scan_right(g, edge, row, claimed, used_labels, stop_col=lab.c2)
+        if res is None or res[0] != "split" or res[3][:2] != ["年", "月"]:
+            continue
+        kind, boxes, prefix, suffixes = res
+        f = _make_box_field(sheet, lab.text, kind, boxes, prefix, suffixes)
+        f.template = "日付"  # fill takes a date; the year is 和暦 when the sheet uses 和暦
+        fields.append(f)
+        claimed.update(boxes)
+        used_labels.add(lab)
+
     # ---- 3b. [box] 御中 / 様 / 殿 ------------------------------------------
     for reg in regions:
         if reg.empty or not isinstance(reg.value, str) or reg.text not in HONORIFICS:
@@ -720,6 +734,11 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set, stop_co
                     boxes.append(reg)  # [ ][ ][ ] merged per character
                     suffixes.append(None)
                     c = reg.c2 + 1
+                    continue
+                if (boxes and suffixes[-1] is None and reg.merged and boxes[-1].merged
+                        and "left" not in reg.sides and "right" not in boxes[-1].sides
+                        and (reg.r1, reg.r2) == (boxes[-1].r1, boxes[-1].r2)):
+                    c = reg.c2 + 1  # no line between them: the same box drawn as two merged cells
                     continue
                 if boxes and suffixes[-1] is None:
                     break  # two different boxes with nothing between: separate fields

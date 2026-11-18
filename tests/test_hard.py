@@ -227,7 +227,7 @@ class RealFormLayoutTests(unittest.TestCase):
 
     def test_fields(self):
         f = {x.id: x for x in detect(load(self.path))}
-        self.assertEqual(set(f), {"名称（氏名）", "担当者名", "担当課", "所在地（住所）", "日付", "法人番号", "指定番号", "送付先"})
+        self.assertEqual(set(f), {"名称（氏名）", "担当者名", "担当課", "所在地（住所）", "日付", "法人番号", "指定番号", "送付先", "変更年月日"})
         self.assertEqual(f["送付先"].template, "〒")  # printed mark, not a filled value
         self.assertEqual(len(f["指定番号"].parts), 6)  # boxes in the row under the label
         self.assertEqual(f["担当課"].cell, "U13")  # unmerged caption spills right: write under it
@@ -245,6 +245,10 @@ class RealFormLayoutTests(unittest.TestCase):
             self.assertEqual(rep.errors, [])
             sh = load(out).sheet("届出書")
             self.assertEqual(sh.value(17, 6), "〒730-0011 広島市中区")
+            rep = fill(self.path, os.path.join(tmp, "q.xlsx"), {"変更年月日": "2026-12-01"})
+            self.assertEqual(rep.errors, [])
+            sq = load(os.path.join(tmp, "q.xlsx")).sheet("届出書")
+            self.assertEqual([sq.value(21, c) for c in (18, 22, 25)], [8, 12, 1])  # 和暦: the sheet prints 令和
             self.assertEqual([sh.value(15, c) for c in (4, 7, 10)], [8, 11, 19])
             rep = fill(self.path, os.path.join(tmp, "p.xlsx"), {"日付": "2018-01-01"})
             self.assertTrue(rep.errors)  # 平成 date into a 令和 form is an error, not a wrong year
