@@ -1613,6 +1613,8 @@ class Grid {
 
 // ---- text classifiers ---------------------------------------------------
 function placeholderDates(text) {
+  const tokens = stripWS(pyStr(text)).split(RE_SPACES1).filter((t) => t);
+  if (tokens.length >= 5 && tokens.every((t) => cpLen(t) === 1)) return []; // 均等割付 caption 「変　更　年　月　日」
   const out = [];
   for (const m of text.matchAll(RE_DATE_ONE)) {
     const g = m.groups;
@@ -2308,7 +2310,7 @@ function detectTables(g, regions) {
     let run = [];
     const runs = [];
     for (const reg of rowRegs) {
-      if (isHeader(reg) && (!run.length || reg.c1 === run[run.length - 1].c2 + 1)) run.push(reg);
+      if (isHeader(reg) && (!run.length || (reg.c1 === run[run.length - 1].c2 + 1 && reg.r2 === run[0].r2))) run.push(reg);
       else { if (run.length >= 2) runs.push(run); run = isHeader(reg) ? [reg] : []; }
     }
     if (run.length >= 2) runs.push(run);

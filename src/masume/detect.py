@@ -246,6 +246,9 @@ class Grid:
 # --------------------------------------------------------------------------
 def placeholder_dates(text: str) -> list[re.Match]:
     """Date placeholders (with blank y/m/d) inside *text*."""
+    tokens = [t for t in _SPACES.split(str(text).strip()) if t]
+    if len(tokens) >= 5 and all(len(t) == 1 for t in tokens):
+        return []  # 均等割付 caption 「変　更　年　月　日」, not 「　年　月　日」
     out = []
     for m in _DATE_ONE.finditer(text):
         if not (m.group("g1") or m.group("m")) or not (m.group("g2") or m.group("d")):
@@ -1055,7 +1058,7 @@ def _detect_tables(g: Grid, regions: list[Region]):
         run: list[Region] = []
         runs: list[list[Region]] = []
         for reg in row_regs:
-            if _is_header(reg) and (not run or reg.c1 == run[-1].c2 + 1):
+            if _is_header(reg) and (not run or (reg.c1 == run[-1].c2 + 1 and reg.r2 == run[0].r2)):
                 run.append(reg)
             else:
                 if len(run) >= 2:
