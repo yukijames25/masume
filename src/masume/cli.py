@@ -30,13 +30,9 @@ def template_for(fields) -> dict:
     out: dict = {}
     for f in fields:
         if f.kind == "table":
-            out[f.id] = [{c["id"]: "" for c in f.columns}]
-        elif f.kind == "choice":
-            out[f.id] = f.options[0] if f.options else ""
-        elif f.kind in ("date", "inline_date"):
-            out[f.id] = "YYYY-MM-DD"
+            out[f.id] = []
         else:
-            out[f.id] = ""
+            out[f.id] = None  # null = leave untouched
     return out
 
 

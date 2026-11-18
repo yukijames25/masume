@@ -303,6 +303,9 @@ def fill(
         report.written.append({"key": key, "field": fid, "cell": f"{sheet_name}!{ref}", "value": value})
 
     for key, value in data.items():
+        if value is None or value == "" or value == [] or (
+                isinstance(value, str) and value.strip().upper() in ("YYYY-MM-DD", "YYYY/MM/DD")):
+            continue  # null / empty / template placeholder: leave the form untouched
         f = resolve(fields, key)
         if f is None:
             m = _CELL_KEY.match(key)
