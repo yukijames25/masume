@@ -3358,6 +3358,10 @@ function currentValue(sheet, f) {
     return sel.length ? sel : null;
   }
   const v = at(f.cell);
+  if (f.kind === 'choice' && isStr(v) && f.options.length) { // 「■年次有給休暇　□特別休暇…」 -> just what is ticked
+    const sel = f.options.filter((o) => new RegExp(`[${CHECKED_CHARS}][${WS}]*${escapeRe(o)}`, 'u').test(v));
+    return sel.length ? sel : null;
+  }
   if (['inline_date', 'pattern', 'inline_text', 'choice', 'circle', 'text'].includes(f.kind) && f.template && v === f.template) return null; // still the printed placeholder
   return v;
 }

@@ -61,6 +61,10 @@ def current_value(sheet, f):
         sel = [p["option"] for p in f.parts if (str(at(p["cell"]) or "").strip() or "-") in marks]  # "" is in every string
         return sel or None
     v = at(f.cell)
+    if f.kind == "choice" and isinstance(v, str) and f.options:
+        # 「■年次有給休暇　□特別休暇…」 -> just what is ticked
+        sel = [o for o in f.options if re.search("[" + CHECKED_CHARS + r"]\s*" + re.escape(o), v)]
+        return sel or None
     if f.kind in ("inline_date", "pattern", "inline_text", "choice", "circle", "text") and f.template and v == f.template:
         return None  # still the printed placeholder
     return v
