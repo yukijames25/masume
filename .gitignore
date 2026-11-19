@@ -5,3 +5,5 @@ dist/
 .venv/
 *_filled.xlsx
 ~$*.xlsx
+docs/report.html
+*_記入済.xlsx

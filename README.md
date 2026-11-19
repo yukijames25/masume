@@ -1,7 +1,18 @@
 # masume（升目）
 
 **Excel方眼紙（神エクセル）の申請書を、AIエージェントが“壊さずに”読み書きするためのツール。**
-Python 標準ライブラリだけで動きます（依存ゼロ・約100KB）。
+Python 標準ライブラリだけで動きます（依存ゼロ・約110KB）。
+
+*masume fills unmodified Japanese "Excel 方眼紙" government/office forms (merged cells, □ checkboxes, 和暦 dates) for AI agents, without breaking the layout. Zero dependencies; CLI, MCP server, Claude Code skill and an offline single-file web version.*
+
+## インストール
+
+```bash
+pip install git+https://github.com/yukijames25/masume
+masume --help
+```
+
+Python 3.10 以上。依存ライブラリはありません。インストールせずに試すなら、ブラウザ版 `web/index.html` を開くだけで使えます。
 
 ```
 $ python -m masume inspect 休暇届.xlsx
@@ -44,9 +55,9 @@ python -m masume inspect  form.xlsx --json     # 入力欄をJSONで
 python -m masume template form.xlsx > v.json   # 記入用の雛形
 python -m masume fill     form.xlsx v.json -o out.xlsx
 
-# またはインストール
-pip install -e .
+# インストール済みなら
 masume inspect form.xlsx
+masume fill form.xlsx v.json -o out.xlsx --brief   # --brief: 書いた内容を欄ごとに1行で表示
 ```
 
 ### 値の書き方
@@ -107,5 +118,10 @@ python tests/make_fixtures.py              # テスト用様式の再生成（�
 ```
 
 なぜこれを作ったか（市場調査）は [docs/RESEARCH.md](docs/RESEARCH.md)。
+
+## うまくいかないとき
+
+検出が外れた様式、記入がずれた様式があれば、[Issue](https://github.com/yukijames25/masume/issues) で教えてください。
+様式そのものを添付できない場合は、`masume md 様式.xlsx` の出力（個人情報を含まない記入前のもの）を貼ってもらえると助かります。
 
 License: MIT
