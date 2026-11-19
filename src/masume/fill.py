@@ -10,7 +10,7 @@ from . import ooxml
 from .detect import (BOX_CHARS, Field, _INLINE_BLANK, detect, form_sheets, normalize_label,
                      placeholder_dates)
 from .ooxml import Workbook, parse_ref
-from .wareki import parse_date, to_wareki, wareki_year_str
+from .wareki import parse_date, parse_year_month, to_wareki, wareki_year_str
 
 ERA_ABBR = {"明治": "明", "大正": "大", "昭和": "昭", "平成": "平", "令和": "令"}
 _SPLIT = re.compile(r"[-－ー‐−/／:：.．\s　()（）]+")
@@ -433,7 +433,11 @@ def _fill_parts(f: Field, value, put, key: str, wareki: bool = False) -> None:
                 raise FillError(f"unknown part {k!r} (have {[p.get('suffix') for p in f.parts]})")
             put(f.sheet, p["cell"], _num(v) if isinstance(v, str) else v, key, f.id)
         return
-    d = parse_date(value) if f.template in _ERA_SPLIT or f.template == "日付" else None
+    dated = f.template in _ERA_SPLIT or f.template == "日付"
+    d = parse_date(value) if dated else None
+    day_given = d is not None
+    if dated and d is None:
+        d = parse_year_month(value)  # 「2026-12」「令和8年12月」: the 日 box stays empty
     if d is not None:
         # 「令和[ ]年[ ]月[ ]日」 drawn over separate cells; 「日付」: no era printed
         if f.template == "西暦" or (f.template == "日付" and not wareki):
@@ -444,12 +448,17 @@ def _fill_parts(f: Field, value, put, key: str, wareki: bool = False) -> None:
             era, y = to_wareki(d)
             if era != f.template:
                 raise FillError(f"{value!r} は{era}の日付です（様式は「{f.template}」）")
-        nums = {"年": y, "月": d.month, "日": d.day}
+        nums = {"年": y, "月": d.month, "日": d.day} if day_given else {"年": y, "月": d.month}
         for p in f.parts:
             if p.get("suffix") in nums:
                 put(f.sheet, p["cell"], nums[p["suffix"]], key, f.id)
         return
     parts = _split_value(value, n)
+    if dated and f.template != "西暦" and f.parts and f.parts[0].get("suffix") == "年" and parts and re.fullmatch(
+            r"\d{4}", str(parts[0]).strip()):
+        # dogfood: "2026-12" once became 「令和2026年」 - never write a western year into an era box
+        raise FillError(f"{value!r}: 和暦の欄（{f.template}[ ]年）に西暦の年は書けません。"
+                        f"'2026-12-01'、'2026-12'、'令和8年12月' のように渡してください")
     if len(parts) == 1 and n == 2 and re.fullmatch(r"\d{7}", str(parts[0])):
         parts = [parts[0][:3], parts[0][3:]]  # 郵便番号 1000001 -> 100 / 0001
     if len(parts) != n:

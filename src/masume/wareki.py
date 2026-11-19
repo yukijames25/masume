@@ -49,6 +49,30 @@ def parse_date(value) -> _dt.date | None:
     return None
 
 
+_YM_RE = re.compile(r"^\s*(\d{4})\s*[-/.年]\s*(\d{1,2})\s*月?\s*$")
+_WAREKI_YM_RE = re.compile(
+    r"^\s*(令和|平成|昭和|大正|明治|[令平昭大明]|[RHSTMrhstm])\s*(元|\d{1,2})\s*[年./\-]\s*(\d{1,2})\s*月?\s*$")
+
+
+def parse_year_month(value) -> _dt.date | None:
+    """「2026-12」「2026年12月」「令和8年12月」「R8.12」 -> the 1st of that month."""
+    if not isinstance(value, str):
+        return None
+    value = _z2h(value)
+    try:
+        m = _YM_RE.match(value)
+        if m:
+            return _dt.date(int(m.group(1)), int(m.group(2)), 1)
+        m = _WAREKI_YM_RE.match(value)
+        if m:
+            era = _ERA_ALIAS.get(m.group(1).upper() if len(m.group(1)) == 1 else m.group(1), m.group(1))
+            y = 1 if m.group(2) == "元" else int(m.group(2))
+            return _dt.date(_ERA_START[era] + y - 1, int(m.group(3)), 1)
+    except (ValueError, KeyError):
+        return None
+    return None
+
+
 def to_wareki(d: _dt.date) -> tuple[str, int]:
     for name, start in ERAS:
         if d >= start:

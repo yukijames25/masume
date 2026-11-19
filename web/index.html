@@ -2521,6 +2521,24 @@ const ERA_ALIAS = { 令: '令和', R: '令和', 平: '平成', H: '平成', 昭:
 // 「昭和60年6月15日」「平成元年4月2日」「S60.6.15」「H2/4/2」「R8.11.19」
 const RE_WAREKI = new RegExp(`^[${WS}]*(令和|平成|昭和|大正|明治|[令平昭大明]|[RHSTMrhstm])[${WS}]*(元|\\p{Nd}{1,2})[${WS}]*[年./\\-][${WS}]*(\\p{Nd}{1,2})[${WS}]*[月./\\-][${WS}]*(\\p{Nd}{1,2})[${WS}]*日?[${WS}]*$`, 'u');
 const Z2H = { '０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', '／': '/', '－': '-', '．': '.' };
+const RE_YM = new RegExp(`^[${WS}]*(\\p{Nd}{4})[${WS}]*[-/.年][${WS}]*(\\p{Nd}{1,2})[${WS}]*月?[${WS}]*$`, 'u');
+const RE_WAREKI_YM = new RegExp(`^[${WS}]*(令和|平成|昭和|大正|明治|[令平昭大明]|[RHSTMrhstm])[${WS}]*(元|\\p{Nd}{1,2})[${WS}]*[年./\\-][${WS}]*(\\p{Nd}{1,2})[${WS}]*月?[${WS}]*$`, 'u');
+/** 「2026-12」「2026年12月」「令和8年12月」「R8.12」 -> the 1st of that month. */
+function parseYearMonth(value) {
+  if (typeof value !== 'string') return null;
+  value = z2h(value);
+  let mt = RE_YM.exec(value);
+  if (mt) return mkDate(Number(asciiDigits(mt[1])), Number(asciiDigits(mt[2])), 1);
+  mt = RE_WAREKI_YM.exec(value);
+  if (mt) {
+    const g1 = mt[1];
+    const era = ERA_ALIAS[cpLen(g1) === 1 ? g1.toUpperCase() : g1] ?? g1;
+    if (!(era in ERA_START)) return null;
+    const y = mt[2] === '元' ? 1 : Number(asciiDigits(mt[2]));
+    return mkDate(ERA_START[era] + y - 1, Number(asciiDigits(mt[3])), 1);
+  }
+  return null;
+}
 function z2h(s) { return s.replace(/[０-９／－．]/g, (ch) => Z2H[ch]); }
 function mkDate(y, m, d) { return y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > daysIn(y, m) ? null : { y, m, d }; }
 /** -> {y, m, d} | null (only strings, like the Python version) */
@@ -2825,7 +2843,10 @@ function fillParts(f, value, put, key, wareki = false) {
     }
     return;
   }
-  const dt = ERA_SPLIT.has(f.template) || f.template === '日付' ? parseDate(value) : null;
+  const dated = ERA_SPLIT.has(f.template) || f.template === '日付';
+  let dt = dated ? parseDate(value) : null;
+  const dayGiven = dt !== null;
+  if (dated && dt === null) dt = parseYearMonth(value); // 「2026-12」「令和8年12月」: the 日 box stays empty
   if (dt !== null) {
     // 「令和[ ]年[ ]月[ ]日」 drawn over separate cells; 「日付」: no era printed
     let y = dt.y;
@@ -2834,11 +2855,15 @@ function fillParts(f, value, put, key, wareki = false) {
       if (era !== f.template) throw new FillError(`${pyRepr(value)} は${era}の日付です（様式は「${f.template}」）`);
       y = ey;
     }
-    const nums = { 年: y, 月: dt.m, 日: dt.d };
+    const nums = dayGiven ? { 年: y, 月: dt.m, 日: dt.d } : { 年: y, 月: dt.m };
     for (const p of f.parts) if (p.suffix in nums) put(f.sheet, p.cell, nums[p.suffix], key, f.id);
     return;
   }
   let parts = splitValue(value, n);
+  if (dated && f.template !== '西暦' && f.parts.length && f.parts[0].suffix === '年' && parts.length && /^\p{Nd}{4}$/u.test(stripWS(pyStr(parts[0])))) {
+    // dogfood: "2026-12" once became 「令和2026年」 - never write a western year into an era box
+    throw new FillError(`${pyRepr(value)}: 和暦の欄（${f.template}[ ]年）に西暦の年は書けません。'2026-12-01'、'2026-12'、'令和8年12月' のように渡してください`);
+  }
   if (parts.length === 1 && n === 2 && /^\p{Nd}{7}$/u.test(pyStr(parts[0]))) {
     if (!isStr(parts[0])) throw new TypeError(`${pyRepr(parts[0])} は分割できません`);
     parts = [parts[0].slice(0, 3), parts[0].slice(3)]; // 郵便番号 1000001 -> 100 / 0001

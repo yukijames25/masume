@@ -372,3 +372,23 @@ class PaperCheckWarningTests(unittest.TestCase):
             self.assertIn("令和8年 → 8", text)
         finally:
             shutil.rmtree(tmp)
+
+
+class EraYearMonthTests(unittest.TestCase):
+    """dogfood: "2026-12" into 「令和[ ]年[ ]月」 became 令和2026年 with no warning."""
+
+    path = os.path.join(FX, "frame_todoke.xlsx")
+
+    def test_year_month_forms(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            for i, v in enumerate(["2026-12", "2026年12月", "令和8年12月", "R8.12"]):
+                out = os.path.join(tmp, f"o{i}.xlsx")
+                rep = fill(self.path, out, {"日付": v})
+                self.assertEqual(rep.errors, [], v)
+                sh = load(out).sheet("届出書")
+                self.assertEqual([sh.value(15, c) for c in (4, 7, 10)], [8, 12, None], v)
+            rep = fill(self.path, os.path.join(tmp, "x.xlsx"), {"日付": [2026, 12, 1]})
+            self.assertTrue(rep.errors)  # a western year never goes into an era box
+        finally:
+            shutil.rmtree(tmp)

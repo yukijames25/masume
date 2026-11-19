@@ -225,6 +225,9 @@ const fillCases = [
     expect: { '変更届!R10': '広島市南区1-2-3', '変更届!S9': '732-0001', '変更届!S11': '082', '変更届!V11': 111, '変更届!Y11': 2222 } },
   { src: 'tests/fixtures_hard/box_choice.xlsx', data: { '受取方法/変更前': '書面', '受取方法/変更後': '電子データ' }, expect: { '申出書!P4': '✓', '申出書!X4': '✓' } },
   { src: 'tests/fixtures_hard/box_choice.xlsx', data: { '受取方法/変更前': '郵送' }, errors: true },
+  { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: '2026-12' }, expect: { '届出書!D15': 8, '届出書!G15': 12 } },
+  { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: 'R8.12' }, expect: { '届出書!D15': 8, '届出書!G15': 12 } },
+  { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: [2026, 12, 1] }, errors: true },
   // tests/test_safety.py (fixtures_review: files saved by real Excel)
   { src: 'tests/fixtures_review/base.xlsx', data: { A11: 'x', A12: 'y', A14: 'z' }, expect: { 'Sheet1!A11': 'x', 'Sheet1!A12': 'y', 'Sheet1!A14': 'z' } },
   { src: 'tests/fixtures_review/empty.xlsx', data: { A1: 'a', B3: 'b', C2: 'c' }, expect: { 'Sheet1!A1': 'a', 'Sheet1!B3': 'b', 'Sheet1!C2': 'c' } },
