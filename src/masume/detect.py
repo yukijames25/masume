@@ -47,7 +47,7 @@ _TEMPLATE_CHARS = set("〒－-ー‐−()（）:：時分秒年月日歳満生�
 UNIT_TOKENS = {
     "年", "月", "日", "歳", "才", "円", "万円", "千円", "ヶ月", "か月", "カ月", "箇月", "ケ月",
     "時", "分", "秒", "人", "名", "枚", "件", "通", "部", "冊", "台", "回", "号", "番", "番地",
-    "丁目", "階", "泊", "日間", "週間", "%", "％", "kg", "cm", "円/月",
+    "丁目", "階", "泊", "日間", "週間", "年度", "%", "％", "kg", "cm", "円/月",
     "－", "-", "ー", "‐", "−", "―", "〒", "～", "〜", "・", "：", ":", "／", "/", "(", ")", "（", "）",
     "様", "御中", "殿", "印", "㊞",
 }
@@ -60,7 +60,7 @@ CIRCLE_VOCAB = {
 }
 _FURIGANA = {"ふりがな", "フリガナ", "よみがな", "ヨミガナ"}
 # filled in by the office, not the applicant (受付印, ※市記入欄, 処理欄 ...)
-_OFFICE_USE = re.compile(r"受付印?$|受付番号|受理|記入欄$|処理欄|事務処理|整理番号|記入しないで|使用欄|^宛先$|^あて先$")
+_OFFICE_USE = re.compile(r"受付印?$|受付番号|受理|記入欄$|処理欄|事務処理|整理番号|記入しないで|使用欄|^宛先$|^あて先$|問い?合わ?せ先|^提出先")
 # the printed addressee 「広島市長」「〇〇税務署長」 is not a label
 _ADDRESSEE = re.compile(r"(?:市|区|町|村|都|道|府|県|署|所|局|庁)長$|知事$")
 _ERA_NAMES = {"令和", "平成", "昭和", "西暦"}
@@ -499,7 +499,8 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
     labels = [r for r in regions if free_label(r)]
 
     # ---- 3. label -> box(es) on the right --------------------------------
-    for lab in [r for r in regions if is_label(r) and not has_heading_cue(r.text) and r not in claimed]:
+    for lab in [r for r in regions if is_label(r) and not has_heading_cue(r.text) and r not in claimed
+                and not _is_vertical(r.text)]:
         if lab in used_labels and lab.height == 1:
             continue
         if lab not in used_labels and lab not in labels:
@@ -523,7 +524,10 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
             prev_cols = cols
             label = lab.text if not found_any or zip_row else f"{lab.text}({row - lab.r1 + 1})"
             zip_row = False
-            if normalize_label(lab.text) in _ERA_NAMES and kind == "split" and suffixes[0] == "年":
+            if normalize_label(lab.text) in _ERA_NAMES and kind == "text" and suffixes and suffixes[0] in ("年度", "年"):
+                # 「令和[ ]年度」: the box is the year, so the field is 「年度」, not 「令和」
+                f = _make_box_field(sheet, suffixes[0], kind, boxes, prefix, suffixes)
+            elif normalize_label(lab.text) in _ERA_NAMES and kind == "split" and suffixes[0] == "年":
                 f = _make_box_field(sheet, "日付", kind, boxes, prefix, suffixes)
                 f.template = normalize_label(lab.text)  # 「令和[ ]年[ ]月[ ]日」 split over cells
             else:
@@ -806,6 +810,12 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set, stop_co
 
 
 _BOX_PREFIXES = {"〒"}
+
+
+def _is_vertical(t: str) -> bool:
+    """Vertical caption 「給/与/支/払/者」 (one character per line): a group heading, not a field label."""
+    lines = [x for x in str(t).split("\n") if x.strip()]
+    return len(lines) >= 3 and all(len(x.strip()) <= 1 for x in lines)
 
 
 def _is_sentence(t: str) -> bool:

@@ -1453,7 +1453,7 @@ const TEMPLATE_CHARS = new Set([...'〒－-ー‐−()（）:：時分秒年月�
 const UNIT_TOKENS = new Set([
   '年', '月', '日', '歳', '才', '円', '万円', '千円', 'ヶ月', 'か月', 'カ月', '箇月', 'ケ月',
   '時', '分', '秒', '人', '名', '枚', '件', '通', '部', '冊', '台', '回', '号', '番', '番地',
-  '丁目', '階', '泊', '日間', '週間', '%', '％', 'kg', 'cm', '円/月',
+  '丁目', '階', '泊', '日間', '週間', '年度', '%', '％', 'kg', 'cm', '円/月',
   '－', '-', 'ー', '‐', '−', '―', '〒', '～', '〜', '・', '：', ':', '／', '/', '(', ')', '（', '）',
   '様', '御中', '殿', '印', '㊞',
 ]);
@@ -1466,7 +1466,7 @@ const CIRCLE_VOCAB = new Set([
 ]);
 const FURIGANA = new Set(['ふりがな', 'フリガナ', 'よみがな', 'ヨミガナ']);
 // filled in by the office, not the applicant (受付印, ※市記入欄, 処理欄 ...)
-const RE_OFFICE_USE = /受付印?$|受付番号|受理|記入欄$|処理欄|事務処理|整理番号|記入しないで|使用欄|^宛先$|^あて先$/u;
+const RE_OFFICE_USE = /受付印?$|受付番号|受理|記入欄$|処理欄|事務処理|整理番号|記入しないで|使用欄|^宛先$|^あて先$|問い?合わ?せ先|^提出先/u;
 // the printed addressee 「広島市長」「〇〇税務署長」 is not a label
 const RE_ADDRESSEE = /(?:市|区|町|村|都|道|府|県|署|所|局|庁)長$|知事$/u;
 const ERA_NAMES = new Set(['令和', '平成', '昭和', '西暦']);
@@ -1823,7 +1823,7 @@ function detectSheet(sheet, styles) {
   const labelSet = new RSet(labels);
 
   // ---- 3. label -> box(es) on the right
-  for (const lab of regions.filter((r) => isLabel(r) && !hasHeadingCue(r.text) && !claimed.has(r))) {
+  for (const lab of regions.filter((r) => isLabel(r) && !hasHeadingCue(r.text) && !claimed.has(r) && !isVertical(r.text))) {
     if (usedLabels.has(lab) && lab.height === 1) continue;
     if (!usedLabels.has(lab) && !labelSet.has(lab)) continue;
     let foundAny = usedLabels.has(lab);
@@ -1845,7 +1845,10 @@ function detectSheet(sheet, styles) {
       prevCols = cols;
       const label = !foundAny || zipRow ? lab.text : `${lab.text}(${row - lab.r1 + 1})`;
       zipRow = false;
-      if (ERA_NAMES.has(normalizeLabel(lab.text)) && kind === 'split' && suffixes[0] === '年') {
+      if (ERA_NAMES.has(normalizeLabel(lab.text)) && kind === 'text' && suffixes.length && (suffixes[0] === '年度' || suffixes[0] === '年')) {
+        // 「令和[ ]年度」: the box is the year, so the field is 「年度」, not 「令和」
+        fields.push(makeBoxField(sheet, suffixes[0], kind, boxes, prefix, suffixes));
+      } else if (ERA_NAMES.has(normalizeLabel(lab.text)) && kind === 'split' && suffixes[0] === '年') {
         const f = makeBoxField(sheet, '日付', kind, boxes, prefix, suffixes);
         f.template = normalizeLabel(lab.text); // 「令和[ ]年[ ]月[ ]日」 split over cells
         fields.push(f);
@@ -2094,6 +2097,11 @@ function scanRight(g, lab, row, claimed, used, stopCol = null) {
 }
 
 const BOX_PREFIXES = new Set(['〒']);
+/** Vertical caption 「給/与/支/払/者」 (one character per line): a group heading, not a field label. */
+function isVertical(t) {
+  const lines = pyStr(t).split('\n').filter((x) => stripWS(x));
+  return lines.length >= 3 && lines.every((x) => cpLen(stripWS(x)) <= 1);
+}
 /** Instructions and notes 「…してください。」「←…記載」, not field labels. */
 function isSentence(t) {
   t = stripWS(t);
@@ -2787,6 +2795,19 @@ function formatFieldValue(wb, f, value, mark = '■', today = null) {
 
 const RE_DIGIT_STRIP = new RegExp(`[-－ー‐−${WS}　]`, 'gu');
 const ERA_SPLIT = new Set(['令和', '平成', '昭和', '西暦']);
+/** Things a person should double-check on paper (dogfood: 8 digits in 9 boxes went unnoticed). */
+function partsWarnings(f, value, key, wareki) {
+  const out = [];
+  if (f.kind === 'digits' && !Array.isArray(value)) {
+    const k = cpLen(pyStr(value).replace(RE_DIGIT_STRIP, ''));
+    if (k > 0 && k < f.parts.length) out.push(`${key}: ${f.parts.length}マスに${k}文字なので左詰めで書きました（右詰めの様式なら値の前に空白を入れてください）`);
+  }
+  if (wareki && f.template === '日付' && parseDate(value) !== null) {
+    const [era, y] = toWareki(parseDate(value));
+    out.push(`${key}: 元号が印字されていない欄なので、年は和暦の数字（${era}${y}年 → ${y}）で書きました`);
+  }
+  return out;
+}
 function fillParts(f, value, put, key, wareki = false) {
   const n = f.parts.length;
   if (f.kind === 'digits') {
@@ -2972,7 +2993,11 @@ async function fill(wb, data, opts = {}) {
     touched.add(f.id);
     try {
       if (f.kind === 'table') fillTable(f, value, put, key);
-      else if (f.kind === 'split' || f.kind === 'digits') fillParts(f, value, put, key, f.template === '日付' && usesWareki(wb, f.sheet));
+      else if (f.kind === 'split' || f.kind === 'digits') {
+        const wareki = f.template === '日付' && usesWareki(wb, f.sheet);
+        fillParts(f, value, put, key, wareki);
+        report.warnings.push(...partsWarnings(f, value, key, wareki));
+      }
       else if (f.kind === 'choice_cells') fillChoiceCells(f, value, put, key, mark);
       else if (f.kind === 'checkbox') {
         const ctl = controlOf(wb, f);
@@ -3062,7 +3087,7 @@ function currentValue(sheet, f) {
     return sheet.controls.some((c) => c.shape_id === sid && c.checked) ? true : null;
   }
   if (f.kind === 'choice_cells') {
-    const sel = f.parts.filter((p) => { const v = at(p.cell); return (CHECKED_CHARS + 'レ○〇').includes(pyTruthy(v) ? pyStr(v) : ''); }).map((p) => p.option);
+    const sel = f.parts.filter((p) => { const v = at(p.cell); return (CHECKED_CHARS + 'レ○〇').includes((pyTruthy(v) ? stripWS(pyStr(v)) : '') || '-'); /* '' is in every string */ }).map((p) => p.option);
     return sel.length ? sel : null;
   }
   const v = at(f.cell);
@@ -3084,7 +3109,12 @@ function sheetToMarkdown(wb, sheetName = null, layout = true, savedFields = null
     let extra = '';
     if (f.options.length) extra = '選択肢: ' + f.options.join(' / ');
     else if (f.columns.length) extra = '列: ' + f.columns.map((c) => c.id).join(' / ') + `（最大${f.rows.length}行）`;
-    else if (f.parts.length) extra = 'マス: ' + f.parts.map((p) => p.cell + (p.suffix || '')).join(' ');
+    else if (f.parts.length) {
+      if (f.parts.some((p) => p.suffix)) { // read like the form: 令和[E15]年[I15]月[M15]日, [M42]）[Y42]-[AQ42]
+        const pre = f.template && f.template !== '日付' ? f.template : '';
+        extra = '書式: ' + pre + f.parts.map((p) => `[${p.cell}]${p.suffix || ''}`).join('');
+      } else extra = 'マス: ' + f.parts.map((p) => p.cell).join(' ');
+    }
     else if (f.template) extra = '書式: ' + f.template.replace(/\n/g, ' ');
     if (f.suffix) extra = stripWS(extra + ` 単位: ${f.suffix}`);
     if (f.value !== null && f.value !== undefined && f.value !== '' && !(Array.isArray(f.value) && !f.value.length)) {

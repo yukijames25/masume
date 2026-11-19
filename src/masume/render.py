@@ -50,7 +50,8 @@ def current_value(sheet, f):
         sid = f.parts[0]["control"] if f.parts else None
         return True if any(c.shape_id == sid and c.checked for c in sheet.controls) else None
     if f.kind == "choice_cells":
-        sel = [p["option"] for p in f.parts if str(at(p["cell"]) or "") in CHECKED_CHARS + "レ○〇"]
+        marks = CHECKED_CHARS + "レ○〇"
+        sel = [p["option"] for p in f.parts if (str(at(p["cell"]) or "").strip() or "-") in marks]  # "" is in every string
         return sel or None
     v = at(f.cell)
     if f.kind in ("inline_date", "pattern", "inline_text", "choice", "circle", "text") and f.template and v == f.template:
@@ -79,7 +80,12 @@ def sheet_to_markdown(wb: Workbook, sheet_name: str | None = None, layout: bool 
         elif f.columns:
             extra = "列: " + " / ".join(c["id"] for c in f.columns) + f"（最大{len(f.rows)}行）"
         elif f.parts:
-            extra = "マス: " + " ".join(p["cell"] + (p.get("suffix") or "") for p in f.parts)
+            if any(p.get("suffix") for p in f.parts):
+                # read like the form: 令和[E15]年[I15]月[M15]日, [M42]）[Y42]-[AQ42]
+                pre = f.template if f.template and f.template != "日付" else ""
+                extra = "書式: " + pre + "".join(f"[{p['cell']}]{p.get('suffix') or ''}" for p in f.parts)
+            else:
+                extra = "マス: " + " ".join(p["cell"] for p in f.parts)
         elif f.template:
             extra = "書式: " + f.template.replace("\n", " ")
         if f.suffix:

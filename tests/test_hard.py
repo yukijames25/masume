@@ -335,3 +335,40 @@ class DrawnBoxTests(unittest.TestCase):
             self.assertTrue(rep.errors)  # not an option on the form
         finally:
             shutil.rmtree(tmp)
+
+
+class ReadBackTests(unittest.TestCase):
+    """md --fields must report only what is really ticked (dogfood: a blank form showed every option)."""
+
+    def test_blank_and_filled_boxes(self):
+        from masume.render import current_value
+        path = os.path.join(FX, "box_choice.xlsx")
+        fields = detect(load(path))
+        sheet = load(path).sheet("申出書")
+        self.assertTrue(all(current_value(sheet, f) is None for f in fields))
+        tmp = tempfile.mkdtemp()
+        try:
+            out = os.path.join(tmp, "o.xlsx")
+            fill(path, out, {"受取方法/変更後": "電子データ"})
+            sheet = load(out).sheet("申出書")
+            got = {f.id: current_value(sheet, f) for f in fields}
+            self.assertEqual(got["受取方法/変更後"], ["電子データ"])
+            self.assertIsNone(got["受取方法/変更前"])
+        finally:
+            shutil.rmtree(tmp)
+
+
+class PaperCheckWarningTests(unittest.TestCase):
+    """Warnings for things a person should check on paper (dogfood findings)."""
+
+    def test_short_digits_and_eraless_year(self):
+        path = os.path.join(FX, "frame_todoke.xlsx")
+        tmp = tempfile.mkdtemp()
+        try:
+            rep = fill(path, os.path.join(tmp, "o.xlsx"), {"指定番号": "12345", "変更年月日": "2026-12-01"})
+            self.assertEqual(rep.errors, [])
+            text = " ".join(rep.warnings)
+            self.assertIn("6マスに5文字", text)
+            self.assertIn("令和8年 → 8", text)
+        finally:
+            shutil.rmtree(tmp)

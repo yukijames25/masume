@@ -334,7 +334,9 @@ def fill(
             if f.kind == "table":
                 _fill_table(f, value, put, key)
             elif f.kind in ("split", "digits"):
-                _fill_parts(f, value, put, key, wareki=f.template == "日付" and _uses_wareki(wb, f.sheet))
+                wareki = f.template == "日付" and _uses_wareki(wb, f.sheet)
+                _fill_parts(f, value, put, key, wareki=wareki)
+                report.warnings.extend(_parts_warnings(f, value, key, wareki))
             elif f.kind == "choice_cells":
                 _fill_choice_cells(f, value, put, key, mark)
             elif f.kind == "checkbox":
@@ -399,6 +401,19 @@ def _format_single(f: Field, value, wb: Workbook, mark: str, today):
 
 
 _ERA_SPLIT = {"令和", "平成", "昭和", "西暦"}
+
+
+def _parts_warnings(f: Field, value, key: str, wareki: bool) -> list[str]:
+    """Things a person should double-check on paper (dogfood: 8 digits in 9 boxes went unnoticed)."""
+    out = []
+    if f.kind == "digits" and not isinstance(value, (list, tuple)):
+        k = len(re.sub(r"[-－ー‐−\s　]", "", str(value)))
+        if 0 < k < len(f.parts):
+            out.append(f"{key}: {len(f.parts)}マスに{k}文字なので左詰めで書きました（右詰めの様式なら値の前に空白を入れてください）")
+    if wareki and f.template == "日付" and parse_date(value) is not None:
+        era, y = to_wareki(parse_date(value))
+        out.append(f"{key}: 元号が印字されていない欄なので、年は和暦の数字（{era}{y}年 → {y}）で書きました")
+    return out
 
 
 def _fill_parts(f: Field, value, put, key: str, wareki: bool = False) -> None:
