@@ -64,8 +64,32 @@ def build(path):
     wb.save(path)
 
 
+def build_boxes(path):
+    """「受取方法  [ ]電子データ [ ]書面 | [ ]電子データ [ ]書面」: check boxes drawn as boxed cells."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "申出書"
+    for c in range(1, 40):
+        ws.column_dimensions[get_column_letter(c)].width = 2.6
+    put(ws, "B2:G2", "事　　項")
+    put(ws, "H2:V2", "変更前（旧）")
+    put(ws, "W2:AK2", "変更後（新）")
+    for r, label in ((3, "受取方法"), (6, "通知方法")):
+        put(ws, f"B{r}:G{r + 2}", label)
+        for left in (8, 23):  # H, W
+            L = get_column_letter
+            put(ws, f"{L(left + 1)}{r + 1}:{L(left + 2)}{r + 1}")
+            put(ws, f"{L(left + 3)}{r}:{L(left + 7)}{r + 2}", "電子データ", box=False)
+            put(ws, f"{L(left + 8)}{r + 1}:{L(left + 9)}{r + 1}")
+            put(ws, f"{L(left + 10)}{r}:{L(left + 13)}{r + 2}", "書面", box=False)
+    wb.save(path)
+
+
 if __name__ == "__main__":
     os.makedirs(HERE, exist_ok=True)
     out = os.path.join(HERE, "henko_todoke.xlsx")
     build(out)
+    print("wrote", out)
+    out = os.path.join(HERE, "box_choice.xlsx")
+    build_boxes(out)
     print("wrote", out)

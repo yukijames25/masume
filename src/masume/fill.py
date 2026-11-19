@@ -451,6 +451,10 @@ def _fill_choice_cells(f: Field, value, put, key: str, mark: str) -> None:
     if missing:
         raise FillError(f"option(s) not in form: {missing}")
     for p, o in zip(f.parts, opts):
+        if p.get("box"):
+            if o in sel_n:
+                put(f.sheet, p["cell"], "✓", key, f.id)  # a drawn box gets a tick; others stay blank
+            continue
         put(f.sheet, p["cell"], mark if o in sel_n else "□", key, f.id)
 
 

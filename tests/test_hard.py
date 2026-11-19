@@ -311,3 +311,27 @@ class ComparisonGridTests(unittest.TestCase):
             self.assertEqual([sh.value(11, c) for c in (19, 22, 25)], ["082", 111, 2222])
         finally:
             shutil.rmtree(tmp)
+
+
+class DrawnBoxTests(unittest.TestCase):
+    """[ ]電子データ [ ]書面: check boxes drawn as boxed cells (make_henko_fixture.py)."""
+
+    path = os.path.join(FX, "box_choice.xlsx")
+
+    def test_groups_per_column(self):
+        f = {x.id: x for x in detect(load(self.path))}
+        self.assertEqual(set(f), {"受取方法/変更前", "受取方法/変更後", "通知方法/変更前", "通知方法/変更後"})
+        self.assertEqual(f["受取方法/変更後"].options, ["電子データ", "書面"])
+
+    def test_tick(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            out = os.path.join(tmp, "o.xlsx")
+            rep = fill(self.path, out, {"受取方法/変更前": "書面", "受取方法/変更後": "電子データ"})
+            self.assertEqual(rep.errors, [])
+            sh = load(out).sheet("申出書")
+            self.assertEqual([sh.value(4, 9), sh.value(4, 16), sh.value(4, 24), sh.value(4, 31)], [None, "✓", "✓", None])
+            rep = fill(self.path, os.path.join(tmp, "p.xlsx"), {"受取方法/変更前": "郵送"})
+            self.assertTrue(rep.errors)  # not an option on the form
+        finally:
+            shutil.rmtree(tmp)

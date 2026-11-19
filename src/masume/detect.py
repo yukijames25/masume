@@ -397,7 +397,10 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
     def new(label, reg, kind, **kw) -> Field:
         return Field("", label, sheet.name, reg.ref, reg.range, kind, **kw)
 
-    # ---- 0. comparison grids: 事項 | 変更前 | 変更後 ------------------------
+    # ---- 0. check boxes drawn as boxed cells: [ ]電子データ [ ]書面 ----------
+    fields.extend(_drawn_box_fields(g, sheet, regions, used_labels, claimed))
+
+    # ---- 0b. comparison grids: 事項 | 変更前 | 変更後 -----------------------
     fields.extend(_comparison_fields(g, sheet, regions, used_labels, claimed))
 
     # ---- 1. tables -------------------------------------------------------
@@ -503,6 +506,7 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
             continue
         found_any = lab in used_labels
         prev_cols = None
+        zip_row = False  # a 〒 box was found: the next row is the address itself
         for row in range(lab.r1 + (1 if found_any else 0), lab.r2 + 1):
             res = _scan_right(g, lab, row, claimed, used_labels)
             if res is None:
@@ -517,12 +521,16 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
                     claimed.update(boxes)
                     continue  # lower half of the same boxes drawn over two rows (法人番号)
             prev_cols = cols
-            label = lab.text if not found_any else f"{lab.text}({row - lab.r1 + 1})"
+            label = lab.text if not found_any or zip_row else f"{lab.text}({row - lab.r1 + 1})"
+            zip_row = False
             if normalize_label(lab.text) in _ERA_NAMES and kind == "split" and suffixes[0] == "年":
                 f = _make_box_field(sheet, "日付", kind, boxes, prefix, suffixes)
                 f.template = normalize_label(lab.text)  # 「令和[ ]年[ ]月[ ]日」 split over cells
             else:
                 f = _make_box_field(sheet, label, kind, boxes, prefix, suffixes)
+                if prefix == "〒" and not found_any and lab.r2 > row:
+                    f.id_hint = f"{normalize_label(lab.text)}(〒)"  # 「現住所(〒)」, the address goes in 「現住所」
+                    zip_row = True
             fields.append(f)
             claimed.update(boxes)
             found_any = True
@@ -912,6 +920,95 @@ def _comparison_fields(g: Grid, sheet: Sheet, regions: list[Region], used: set, 
             corner = g.at(first.r1, corner.c1 - 1)
         if corner is not None and is_label(corner):
             used.add(corner)  # 「事項」
+    return out
+
+
+_ALL_SIDES = frozenset({"left", "right", "top", "bottom"})
+_TICKS = set(CHECKED_CHARS) | {"レ", "○", "〇"}
+
+
+def _drawn_box_fields(g: Grid, sheet: Sheet, regions: list[Region], used: set, claimed: set) -> list[Field]:
+    """[□] drawn as a small boxed cell, its caption to the right: 「[ ] 電子データ  [ ] 書面」.
+
+    Two or more on one row make one choice field; a repeated caption starts a new
+    group (変更前 / 変更後), named after the column header above when there are several.
+    """
+    pairs = []
+    for box in regions:
+        if (not box.merged or box in claimed or box.width > 6 or box.height > 4 or box.sides != _ALL_SIDES
+                or not (box.empty or box.text in _TICKS)):
+            continue
+        cap = None
+        c = box.c2 + 1
+        while c <= box.c2 + 3:
+            reg = g.at(box.r1, c)
+            if reg is None:
+                break
+            if not reg.empty:
+                if (isinstance(reg.value, str) and reg.r1 <= box.r1 and reg.r2 >= box.r2 and is_label(reg)
+                        and len(normalize_label(reg.text)) <= 12 and reg not in claimed):
+                    cap = reg
+                break
+            if reg.merged or (reg.bordered and not is_frame(reg)):
+                break
+            c = reg.c2 + 1
+        if cap is not None:
+            pairs.append((box, cap))
+    by_row: dict[int, list] = {}
+    for box, cap in pairs:
+        by_row.setdefault(box.r1, []).append((box, cap))
+    out: list[Field] = []
+    for r, items in sorted(by_row.items()):
+        items.sort(key=lambda x: x[0].c1)
+        groups: list[list] = [[]]
+        for box, cap in items:
+            if any(normalize_label(cap.text) == normalize_label(c2.text) for _, c2 in groups[-1]):
+                groups.append([])
+            groups[-1].append((box, cap))
+        groups = [gr for gr in groups if len(gr) >= 2]
+        if not groups:
+            continue
+        first_box = groups[0][0][0]
+        row_lab = None
+        c = first_box.c1 - 1
+        while c >= 1:
+            reg = g.at(r, c)
+            if reg is None:
+                break
+            if not reg.empty:
+                row_lab = reg if is_label(reg) else None
+                break
+            c = reg.c1 - 1
+        base = normalize_label(row_lab.text) if row_lab is not None else "選択"
+        for gr in groups:
+            name = base
+            if len(groups) > 1 and row_lab is not None:
+                head = None
+                for rr in range(row_lab.r1 - 1, max(row_lab.r1 - 20, 0), -1):
+                    reg = g.at(rr, gr[0][0].c1)
+                    if reg is not None and not reg.empty and isinstance(reg.value, str):
+                        head = reg
+                        break
+                if head is not None:
+                    used.add(head)  # a column header, never a filled value
+                    h = normalize_label(head.text).split("※")[0]
+                    h = re.sub(r"[（(][^（(）)]*[）)]$", "", h) or h
+                    name = f"{base}/{h}"
+            parts = [{"cell": b.ref, "option": normalize_label(cp.text), "box": True} for b, cp in gr]
+            last = gr[-1][1]
+            f = Field("", row_lab.text if row_lab is not None else "選択", sheet.name, gr[0][0].ref,
+                      f"{gr[0][0].ref}:{make_ref(last.r2, last.c2)}", "choice_cells",
+                      options=[p["option"] for p in parts], parts=parts,
+                      value=[normalize_label(cp.text) for b, cp in gr if b.text in _TICKS] or None)
+            f.id_hint = name
+            out.append(f)
+            for b, cp in gr:
+                claimed.add(b)
+                claimed.add(cp)
+                used.add(cp)
+        if row_lab is not None:
+            used.add(row_lab)
+            claimed.add(row_lab)  # no second pass over its other rows
     return out
 
 

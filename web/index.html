@@ -1724,7 +1724,10 @@ function detectSheet(sheet, styles) {
   };
   const nw = (label, reg, kind, o) => new Field('', label, sheet.name, reg.ref, reg.range, kind, o);
 
-  // ---- 0. comparison grids: 事項 | 変更前 | 変更後
+  // ---- 0. check boxes drawn as boxed cells: [ ]電子データ [ ]書面
+  fields.push(...drawnBoxFields(g, sheet, regions, usedLabels, claimed));
+
+  // ---- 0b. comparison grids: 事項 | 変更前 | 変更後
   fields.push(...comparisonFields(g, sheet, regions, usedLabels, claimed));
 
   // ---- 1. tables
@@ -1825,6 +1828,7 @@ function detectSheet(sheet, styles) {
     if (!usedLabels.has(lab) && !labelSet.has(lab)) continue;
     let foundAny = usedLabels.has(lab);
     let prevCols = null;
+    let zipRow = false; // a 〒 box was found: the next row is the address itself
     for (let row = lab.r1 + (foundAny ? 1 : 0); row <= lab.r2; row++) {
       const res = scanRight(g, lab, row, claimed, usedLabels);
       if (res === null) continue;
@@ -1839,13 +1843,16 @@ function detectSheet(sheet, styles) {
         }
       }
       prevCols = cols;
-      const label = !foundAny ? lab.text : `${lab.text}(${row - lab.r1 + 1})`;
+      const label = !foundAny || zipRow ? lab.text : `${lab.text}(${row - lab.r1 + 1})`;
+      zipRow = false;
       if (ERA_NAMES.has(normalizeLabel(lab.text)) && kind === 'split' && suffixes[0] === '年') {
         const f = makeBoxField(sheet, '日付', kind, boxes, prefix, suffixes);
         f.template = normalizeLabel(lab.text); // 「令和[ ]年[ ]月[ ]日」 split over cells
         fields.push(f);
       } else {
-        fields.push(makeBoxField(sheet, label, kind, boxes, prefix, suffixes));
+        const f = makeBoxField(sheet, label, kind, boxes, prefix, suffixes);
+        if (prefix === '〒' && !foundAny && lab.r2 > row) { f.id_hint = `${normalizeLabel(lab.text)}(〒)`; zipRow = true; } // the address goes in 「現住所」
+        fields.push(f);
       }
       claimed.addAll(boxes);
       foundAny = true;
@@ -2185,6 +2192,83 @@ function comparisonFields(g, sheet, regions, used, claimed) {
     let corner = g.at(first.r1, first.c1 - 1);
     while (corner !== null && corner.empty && corner.c1 > 1) corner = g.at(first.r1, corner.c1 - 1);
     if (corner !== null && isLabel(corner)) used.add(corner); // 「事項」
+  }
+  return out;
+}
+
+const TICKS = new Set([...CHECKED_CHARS, 'レ', '○', '〇']);
+/**
+ * [□] drawn as a small boxed cell, its caption to the right: 「[ ] 電子データ  [ ] 書面」.
+ * Two or more on one row make one choice field; a repeated caption starts a new group (変更前 / 変更後).
+ */
+function drawnBoxFields(g, sheet, regions, used, claimed) {
+  const pairs = [];
+  for (const box of regions) {
+    if (!box.merged || claimed.has(box) || box.width > 6 || box.height > 4 || box.sides.size !== 4 ||
+        !(box.empty || TICKS.has(box.text))) continue;
+    let cap = null;
+    let c = box.c2 + 1;
+    while (c <= box.c2 + 3) {
+      const reg = g.at(box.r1, c);
+      if (reg === null) break;
+      if (!reg.empty) {
+        if (isStr(reg.value) && reg.r1 <= box.r1 && reg.r2 >= box.r2 && isLabel(reg) &&
+            cpLen(normalizeLabel(reg.text)) <= 12 && !claimed.has(reg)) cap = reg;
+        break;
+      }
+      if (reg.merged || (reg.bordered && !isFrame(reg))) break;
+      c = reg.c2 + 1;
+    }
+    if (cap !== null) pairs.push([box, cap]);
+  }
+  const byRow = new Map();
+  for (const [box, cap] of pairs) { if (!byRow.has(box.r1)) byRow.set(box.r1, []); byRow.get(box.r1).push([box, cap]); }
+  const out = [];
+  for (const r of [...byRow.keys()].sort((a, b) => a - b)) {
+    const items = byRow.get(r).sort((a, b) => a[0].c1 - b[0].c1);
+    let groups = [[]];
+    for (const [box, cap] of items) {
+      if (groups[groups.length - 1].some(([, c2]) => normalizeLabel(cap.text) === normalizeLabel(c2.text))) groups.push([]);
+      groups[groups.length - 1].push([box, cap]);
+    }
+    groups = groups.filter((gr) => gr.length >= 2);
+    if (!groups.length) continue;
+    const firstBox = groups[0][0][0];
+    let rowLab = null;
+    let c = firstBox.c1 - 1;
+    while (c >= 1) {
+      const reg = g.at(r, c);
+      if (reg === null) break;
+      if (!reg.empty) { rowLab = isLabel(reg) ? reg : null; break; }
+      c = reg.c1 - 1;
+    }
+    const base = rowLab !== null ? normalizeLabel(rowLab.text) : '選択';
+    for (const gr of groups) {
+      let name = base;
+      if (groups.length > 1 && rowLab !== null) {
+        let head = null;
+        for (let rr = rowLab.r1 - 1; rr > Math.max(rowLab.r1 - 20, 0); rr--) {
+          const reg = g.at(rr, gr[0][0].c1);
+          if (reg !== null && !reg.empty && isStr(reg.value)) { head = reg; break; }
+        }
+        if (head !== null) {
+          used.add(head); // a column header, never a filled value
+          let hh = normalizeLabel(head.text).split('※')[0];
+          hh = hh.replace(/[（(][^（(）)]*[）)]$/u, '') || hh;
+          name = `${base}/${hh}`;
+        }
+      }
+      const parts = gr.map(([b, cp]) => ({ cell: b.ref, option: normalizeLabel(cp.text), box: true }));
+      const last = gr[gr.length - 1][1];
+      const checked = gr.filter(([b]) => TICKS.has(b.text)).map(([, cp]) => normalizeLabel(cp.text));
+      const f = new Field('', rowLab !== null ? rowLab.text : '選択', sheet.name, gr[0][0].ref,
+        `${gr[0][0].ref}:${makeRef(last.r2, last.c2)}`, 'choice_cells',
+        { options: parts.map((p) => p.option), parts, value: checked.length ? checked : null });
+      f.id_hint = name;
+      out.push(f);
+      for (const [b, cp] of gr) { claimed.add(b); claimed.add(cp); used.add(cp); }
+    }
+    if (rowLab !== null) { used.add(rowLab); claimed.add(rowLab); } // no second pass over its other rows
   }
   return out;
 }
@@ -2752,7 +2836,10 @@ function fillChoiceCells(f, value, put, key, mark) {
   const opts = f.parts.map((p) => normalizeLabel(p.option));
   const missing = selN.filter((s) => !opts.includes(s));
   if (missing.length) throw new FillError(`フォームにない選択肢です: ${missing.join(', ')}`);
-  f.parts.forEach((p, k) => put(f.sheet, p.cell, selN.includes(opts[k]) ? mark : '□', key, f.id));
+  f.parts.forEach((p, k) => {
+    if (p.box) { if (selN.includes(opts[k])) put(f.sheet, p.cell, '✓', key, f.id); return; } // drawn box: tick, others stay blank
+    put(f.sheet, p.cell, selN.includes(opts[k]) ? mark : '□', key, f.id);
+  });
 }
 
 function fillTable(f, value, put, key) {
@@ -2975,7 +3062,7 @@ function currentValue(sheet, f) {
     return sheet.controls.some((c) => c.shape_id === sid && c.checked) ? true : null;
   }
   if (f.kind === 'choice_cells') {
-    const sel = f.parts.filter((p) => { const v = at(p.cell); return CHECKED_CHARS.includes(pyTruthy(v) ? pyStr(v) : ''); }).map((p) => p.option);
+    const sel = f.parts.filter((p) => { const v = at(p.cell); return (CHECKED_CHARS + 'レ○〇').includes(pyTruthy(v) ? pyStr(v) : ''); }).map((p) => p.option);
     return sel.length ? sel : null;
   }
   const v = at(f.cell);

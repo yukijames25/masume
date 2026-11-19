@@ -50,7 +50,7 @@ def current_value(sheet, f):
         sid = f.parts[0]["control"] if f.parts else None
         return True if any(c.shape_id == sid and c.checked for c in sheet.controls) else None
     if f.kind == "choice_cells":
-        sel = [p["option"] for p in f.parts if str(at(p["cell"]) or "") in CHECKED_CHARS]
+        sel = [p["option"] for p in f.parts if str(at(p["cell"]) or "") in CHECKED_CHARS + "レ○〇"]
         return sel or None
     v = at(f.cell)
     if f.kind in ("inline_date", "pattern", "inline_text", "choice", "circle", "text") and f.template and v == f.template:
