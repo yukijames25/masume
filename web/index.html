@@ -950,6 +950,8 @@ class Sheet {
     this.merges = [];
     this.locked = []; // [[r1, c1, r2, c2], reason]
     this.controls = []; // form-control check boxes
+    this.colWidths = new Map();
+    this.defaultColWidth = 8.43;
     this._max = null;
   }
   lockReason(row, col) {
@@ -978,6 +980,9 @@ class Styles {
     this.bordered = new Set();
     this.sides = new Map(); // xf index -> Set of 'left'|'right'|'top'|'bottom'
     this.heading = new Set();
+    this.fontSize = new Map(); // xf index -> font size (pt)
+    this.fit = new Map(); // xf index -> 'shrink' | 'wrap'
+    this.defaultSize = 11.0; // font 0: what column widths are measured in
   }
 }
 class Workbook {
@@ -1011,6 +1016,7 @@ async function readStyles(zip) {
     }
   }
   const headingFonts = new Set();
+  const fontSizes = [];
   const fonts = xfind(root, N + 'fonts');
   if (fonts) {
     xfindall(fonts, N + 'font').forEach((f, i) => {
@@ -1020,8 +1026,12 @@ async function readStyles(zip) {
       let big = false;
       if (sz !== null) { try { big = pyFloat(xget(sz, 'val', '11')) >= 14; } catch (e) { big = false; } }
       if (bold || big) headingFonts.add(i);
+      let size = 11.0;
+      if (sz !== null) { const v = Number(xget(sz, 'val', '11')); size = Number.isNaN(v) ? 11.0 : v; }
+      fontSizes.push(size);
     });
   }
+  if (fontSizes.length) st.defaultSize = fontSizes[0];
   const xfs = xfind(root, N + 'cellXfs');
   if (xfs) {
     xfindall(xfs, N + 'xf').forEach((xf, i) => {
@@ -1033,13 +1043,34 @@ async function readStyles(zip) {
         st.bordered.add(i); // Python negative indexing
         st.sides.set(i, borderSides[borderSides.length + bid]);
       }
-      if (headingFonts.has(pyInt(xget(xf, 'fontId', '0')))) st.heading.add(i);
+      const fid = pyInt(xget(xf, 'fontId', '0'));
+      if (headingFonts.has(fid)) st.heading.add(i);
+      if (fid >= 0 && fid < fontSizes.length) st.fontSize.set(i, fontSizes[fid]);
+      const al = xfind(xf, N + 'alignment');
+      if (al) {
+        if (['1', 'true'].includes(xget(al, 'shrinkToFit', ''))) st.fit.set(i, 'shrink');
+        else if (['1', 'true'].includes(xget(al, 'wrapText', ''))) st.fit.set(i, 'wrap');
+      }
     });
   }
   return st;
 }
 
 function readSheetXml(root, sheet, shared) {
+  const fmt = xfind(root, N + 'sheetFormatPr');
+  if (fmt) {
+    const d = xget(fmt, 'defaultColWidth', ''), b = xget(fmt, 'baseColWidth', '');
+    if (d && !Number.isNaN(Number(d))) sheet.defaultColWidth = Number(d);
+    else if (b && !Number.isNaN(Number(b))) sheet.defaultColWidth = Number(b) + 0.71;
+  }
+  const colsEl = xfind(root, N + 'cols');
+  for (const col of colsEl ? xfindall(colsEl, N + 'col') : []) {
+    const lo = Number(xget(col, 'min', '0')), hi = Number(xget(col, 'max', '0'));
+    const hidden = ['1', 'true'].includes(xget(col, 'hidden', ''));
+    const w = hidden ? 0.0 : Number(xget(col, 'width', String(sheet.defaultColWidth)));
+    if (!Number.isInteger(lo) || !Number.isInteger(hi) || Number.isNaN(w)) continue;
+    for (let c = Math.max(lo, 1); c <= Math.min(hi, 16384); c++) sheet.colWidths.set(c, w);
+  }
   const sd = xfind(root, N + 'sheetData');
   if (sd) {
     let prevR = 0;
@@ -3142,6 +3173,7 @@ async function fill(wb, data, opts = {}) {
   const sheetPath = new Map(wb.sheets.map((s) => [s.name, s.path]));
   const defaultSheet = sheet ? wb.sheet(sheet).name : formSheets(wb)[0].name;
   const touched = new Set();
+  const fitWarned = new Set();
   const put = (sheetName, ref, value, key, fid) => {
     let r, c;
     try { [r, c] = parseRef(ref); } catch (e) { if (e instanceof ValueError) { report.errors.push(`${key}: ${e.message}`); return; } throw e; }
@@ -3158,6 +3190,10 @@ async function fill(wb, data, opts = {}) {
     if (isStr(value)) value = cleanText(value);
     try { checkValue(value); } catch (e) { if (e instanceof WriteError) { report.errors.push(`${key}: ${e.message}`); return; } throw e; }
     const path = sheetPath.get(sheetName);
+    if (isStr(value) && !fitWarned.has(key)) {
+      const msg = fitWarning(sh, wb.styles, r, c, value);
+      if (msg) { fitWarned.add(key); report.warnings.push(`${key}: ${msg}`); }
+    }
     if (!updates.has(path)) updates.set(path, new Map());
     updates.get(path).set(KEY(r, c), [r, c, value]);
     report.written.push({ key, field: fid, cell: `${sheetName}!${ref}`, value: value === undefined ? null : value });
@@ -3232,6 +3268,41 @@ function reportToDict(r) {
     warnings: r.warnings,
     errors: r.errors,
   };
+}
+function isWide(o) {
+  return (o >= 0x1100 && o <= 0x115F) || (o >= 0x2E80 && o <= 0xA4CF) || (o >= 0xAC00 && o <= 0xD7A3) || (o >= 0xF900 && o <= 0xFAFF) ||
+    (o >= 0xFE30 && o <= 0xFE4F) || (o >= 0xFF00 && o <= 0xFF60) || (o >= 0xFFE0 && o <= 0xFFE6);
+}
+/** Estimate whether *value* fits the box it goes into (dogfood: a long address printed off the frame). */
+function fitWarning(sh, styles, r, c, value) {
+  if (cpLen(value) < 5 || value.includes('\n')) return null;
+  const styleAt = (col) => { const x = sh.cells.get(KEY(r, col)); return x ? x.style : 0; };
+  const style = styleAt(c);
+  if (styles.fit.get(style) === 'shrink') return null; // Excel shrinks the text to the box
+  const width = (col) => (sh.colWidths.has(col) ? sh.colWidths.get(col) : sh.defaultColWidth);
+  const mg = sh.mergeOf(r, c);
+  let cap;
+  if (mg) {
+    cap = 0;
+    for (let x = mg[1]; x <= mg[3]; x++) cap += width(x);
+    if (styles.fit.get(style) === 'wrap') cap *= Math.max(1, mg[2] - mg[0] + 1);
+  } else {
+    cap = width(c);
+    let x = c;
+    while (x < c + 60) {
+      if ((styles.sides.get(styleAt(x)) || EMPTY_SET).has('right')) break; // the box ends here
+      const nxt = sh.cells.get(KEY(r, x + 1));
+      if ((nxt && nxt.value !== null && nxt.value !== '') || sh.mergeOf(r, x + 1)) break;
+      if ((styles.sides.get(nxt ? nxt.style : 0) || EMPTY_SET).has('left')) break;
+      x += 1;
+      cap += width(x);
+    }
+  }
+  let units = 0;
+  for (const ch of value) units += isWide(ch.codePointAt(0)) ? 2 : 1;
+  const need = units * (styles.fontSize.has(style) ? styles.fontSize.get(style) : styles.defaultSize) / styles.defaultSize;
+  if (need <= cap * 1.05) return null;
+  return `枠に入りきらない可能性があります（枠は全角で約${Math.floor(cap / 2)}字分、値は約${Math.floor(need / 2)}字分）。印刷で文字が欠けたり枠の外に出たりしないか確認してください`;
 }
 function farOutside(sheet, ref) {
   let r, c;

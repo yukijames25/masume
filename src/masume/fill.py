@@ -279,6 +279,7 @@ def fill(
     sheet_path = {s.name: s.path for s in wb.sheets}
     default_sheet = wb.sheet(sheet).name if sheet else form_sheets(wb)[0].name
     touched: set[str] = set()
+    fit_warned: set[str] = set()
 
     def put(sheet_name: str, ref: str, value, key: str, fid: str | None):
         try:
@@ -309,6 +310,11 @@ def fill(
             report.errors.append(f"{key}: {e}")
             return
         updates.setdefault(sheet_path[sheet_name], {})[(r, c)] = value
+        if isinstance(value, str) and key not in fit_warned:
+            msg = _fit_warning(sh, wb.styles, r, c, value)
+            if msg:
+                fit_warned.add(key)
+                report.warnings.append(f"{key}: {msg}")
         report.written.append({"key": key, "field": fid, "cell": f"{sheet_name}!{ref}", "value": value})
 
     for key, value in data.items():
@@ -373,6 +379,51 @@ def fill(
                 except OSError:
                     pass
     return report
+
+
+def _wide(ch: str) -> bool:
+    o = ord(ch)
+    return (0x1100 <= o <= 0x115F or 0x2E80 <= o <= 0xA4CF or 0xAC00 <= o <= 0xD7A3 or 0xF900 <= o <= 0xFAFF
+            or 0xFE30 <= o <= 0xFE4F or 0xFF00 <= o <= 0xFF60 or 0xFFE0 <= o <= 0xFFE6)
+
+
+def _fit_warning(sh, styles, r: int, c: int, value: str) -> str | None:
+    """Estimate whether *value* fits the box it goes into (dogfood: a long address printed off the frame)."""
+    if len(value) < 5 or "\n" in value:
+        return None
+    cell = sh.cells.get((r, c))
+    style = cell.style if cell is not None else 0
+    if styles.fit.get(style) == "shrink":
+        return None  # Excel shrinks the text to the box
+    width = lambda col: sh.col_widths.get(col, sh.default_col_width)  # noqa: E731
+    mg = sh.merge_of(r, c)
+    if mg is not None:
+        cap = sum(width(x) for x in range(mg[1], mg[3] + 1))
+        if styles.fit.get(style) == "wrap":
+            cap *= max(1, mg[2] - mg[0] + 1)
+    else:
+        cap = width(c)
+        x = c
+        while x < c + 60:
+            if "right" in styles.sides.get(style if x == c else _style_at(sh, r, x), frozenset()):
+                break  # the box ends here; text would run past the frame
+            nxt = sh.cells.get((r, x + 1))
+            if (nxt is not None and nxt.value not in (None, "")) or sh.merge_of(r, x + 1) is not None:
+                break
+            if "left" in styles.sides.get(nxt.style if nxt is not None else 0, frozenset()):
+                break
+            x += 1
+            cap += width(x)
+    need = sum(2 if _wide(ch) else 1 for ch in value) * styles.font_size.get(style, styles.default_size) / styles.default_size
+    if need <= cap * 1.05:
+        return None
+    return (f"枠に入りきらない可能性があります（枠は全角で約{int(cap // 2)}字分、値は約{int(need // 2)}字分）。"
+            "印刷で文字が欠けたり枠の外に出たりしないか確認してください")
+
+
+def _style_at(sh, r: int, c: int) -> int:
+    cell = sh.cells.get((r, c))
+    return cell.style if cell is not None else 0
 
 
 def _far_outside(sheet, ref: str) -> bool:

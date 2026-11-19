@@ -116,6 +116,8 @@ class Sheet:
     hidden: bool = False
     locked: list = field(default_factory=list)  # [((r1, c1, r2, c2), reason)]
     controls: list[Control] = field(default_factory=list)
+    col_widths: dict[int, float] = field(default_factory=dict)
+    default_col_width: float = 8.43
 
     def lock_reason(self, row: int, col: int) -> str | None:
         for (r1, c1, r2, c2), why in self.locked:
@@ -149,6 +151,9 @@ class Styles:
     bordered: set[int] = field(default_factory=set)  # cellXfs indices drawing any border
     sides: dict[int, frozenset] = field(default_factory=dict)  # cellXfs index -> {"left",...}
     heading: set[int] = field(default_factory=set)  # bold or large font (titles / headings)
+    font_size: dict[int, float] = field(default_factory=dict)  # cellXfs index -> font size (pt)
+    fit: dict[int, str] = field(default_factory=dict)  # cellXfs index -> "shrink" | "wrap"
+    default_size: float = 11.0  # font 0: what column widths are measured in
 
 
 @dataclass
@@ -224,6 +229,7 @@ def _read_styles(zf: zipfile.ZipFile) -> Styles:
                     sides.add(side)
             border_sides.append(frozenset(sides))
     heading_fonts: set[int] = set()
+    font_sizes: list[float] = []
     fonts = root.find(_N + "fonts")
     if fonts is not None:
         for i, f in enumerate(fonts.findall(_N + "font")):
@@ -236,6 +242,12 @@ def _read_styles(zf: zipfile.ZipFile) -> Styles:
                 big = False
             if bold or big:
                 heading_fonts.add(i)
+            try:
+                font_sizes.append(float(sz.get("val", "11")) if sz is not None else 11.0)
+            except ValueError:
+                font_sizes.append(11.0)
+    if font_sizes:
+        st.default_size = font_sizes[0]
     xfs = root.find(_N + "cellXfs")
     if xfs is not None:
         for i, xf in enumerate(xfs.findall(_N + "xf")):
@@ -243,8 +255,17 @@ def _read_styles(zf: zipfile.ZipFile) -> Styles:
             if bid < len(border_sides) and border_sides[bid]:
                 st.bordered.add(i)
                 st.sides[i] = border_sides[bid]
-            if int(xf.get("fontId", "0")) in heading_fonts:
+            fid = int(xf.get("fontId", "0"))
+            if fid in heading_fonts:
                 st.heading.add(i)
+            if 0 <= fid < len(font_sizes):
+                st.font_size[i] = font_sizes[fid]
+            al = xf.find(_N + "alignment")
+            if al is not None:
+                if al.get("shrinkToFit") in ("1", "true"):
+                    st.fit[i] = "shrink"
+                elif al.get("wrapText") in ("1", "true"):
+                    st.fit[i] = "wrap"
     return st
 
 
@@ -382,6 +403,23 @@ def set_control_vml(vml: str, shape_id: str, checked: bool) -> str:
 
 def _read_sheet(data: bytes, sheet: Sheet, shared: list[str]) -> None:
     root = ET.fromstring(data)
+    fmt = root.find(_N + "sheetFormatPr")
+    try:
+        if fmt is not None and fmt.get("defaultColWidth"):
+            sheet.default_col_width = float(fmt.get("defaultColWidth"))
+        elif fmt is not None and fmt.get("baseColWidth"):
+            sheet.default_col_width = float(fmt.get("baseColWidth")) + 0.71
+    except ValueError:
+        pass
+    cols = root.find(_N + "cols")
+    for col in (cols.findall(_N + "col") if cols is not None else []):
+        try:
+            lo, hi = int(col.get("min", "0")), int(col.get("max", "0"))
+            w = 0.0 if col.get("hidden") in ("1", "true") else float(col.get("width", sheet.default_col_width))
+        except ValueError:
+            continue
+        for c in range(max(lo, 1), min(hi, 16384) + 1):
+            sheet.col_widths[c] = w
     sd = root.find(_N + "sheetData")
     if sd is not None:
         prev_r = 0

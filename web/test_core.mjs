@@ -232,6 +232,7 @@ const fillCases = [
     expect: { '申請書!J2': '（有）', '申請書!L2': 8, '申請書!O2': 3, '申請書!R2': 31, '申請書!F7': '082', '申請書!H7': '251', '申請書!J7': '1234' } },
   { src: 'tests/fixtures_hard/meisai.xlsx', data: { 年月: [{ 年: 8, 月: 5, '支給人員・支給額（臨時雇用者を除く。）/人': 5, '臨時雇用者の支給人員・支給額/円': 80000 }] },
     expect: { '明細!B5': 8, '明細!D5': 5, '明細!E5': 5, '明細!M5': 80000 } },
+  { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { '所在地（住所）': '広島市南区比治山本町二丁目3番45号 比治山テストビルディング5階 総務部' }, expect: { '届出書!O5': '広島市南区比治山本町二丁目3番45号 比治山テストビルディング5階 総務部' } },
   // tests/test_safety.py (fixtures_review: files saved by real Excel)
   { src: 'tests/fixtures_review/base.xlsx', data: { A11: 'x', A12: 'y', A14: 'z' }, expect: { 'Sheet1!A11': 'x', 'Sheet1!A12': 'y', 'Sheet1!A14': 'z' } },
   { src: 'tests/fixtures_review/empty.xlsx', data: { A1: 'a', B3: 'b', C2: 'c' }, expect: { 'Sheet1!A1': 'a', 'Sheet1!B3': 'b', 'Sheet1!C2': 'c' } },

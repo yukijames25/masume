@@ -454,3 +454,20 @@ class BriefOutputTests(unittest.TestCase):
             {"key": "電話", "field": "電話", "cell": "S!C1", "value": "082"},
             {"key": "電話", "field": "電話", "cell": "S!D1", "value": "251"}]}
         self.assertEqual(_brief(rep)["written"], {"法人番号": "12", "電話": "082 / 251"})
+
+
+class FitWarningTests(unittest.TestCase):
+    """dogfood: a long address printed past the frame (and onto a 3rd page) with no warning."""
+
+    path = os.path.join(FX, "frame_todoke.xlsx")
+
+    def test_long_value_warns_short_does_not(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            rep = fill(self.path, os.path.join(tmp, "a.xlsx"),
+                       {"所在地（住所）": "広島市南区比治山本町二丁目3番45号 比治山テストビルディング5階 総務部"})
+            self.assertTrue(any("枠に入りきらない" in w for w in rep.warnings), rep.warnings)
+            rep = fill(self.path, os.path.join(tmp, "b.xlsx"), {"所在地（住所）": "広島市中区1-6-34"})
+            self.assertFalse(any("枠に入りきらない" in w for w in rep.warnings), rep.warnings)
+        finally:
+            shutil.rmtree(tmp)
