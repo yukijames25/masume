@@ -12,7 +12,7 @@ pip install git+https://github.com/yukijames25/masume
 masume --help
 ```
 
-Python 3.10 以上。依存ライブラリはありません。インストールせずに試すなら、ブラウザ版 `web/index.html` を開くだけで使えます。
+Python 3.9 以上。依存ライブラリはありません。インストールせずに試すなら、ブラウザ版 `web/index.html` を開くだけで使えます。
 
 ```
 $ python -m masume inspect 休暇届.xlsx
