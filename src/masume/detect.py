@@ -400,6 +400,9 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
     # ---- 0. check boxes drawn as boxed cells: [ ]電子データ [ ]書面 ----------
     fields.extend(_drawn_box_fields(g, sheet, regions, used_labels, claimed))
 
+    # ---- 0a. 「有 （[ ]年[ ]月[ ]日） ・ 無」: options in separate cells ----------
+    fields.extend(_circle_cell_fields(g, sheet, regions, used_labels, claimed))
+
     # ---- 0b. comparison grids: 事項 | 変更前 | 変更後 -----------------------
     fields.extend(_comparison_fields(g, sheet, regions, used_labels, claimed))
 
@@ -664,6 +667,11 @@ def detect_sheet(sheet: Sheet, styles: Styles | set[int]) -> list[Field]:
             free += 1
             c = reg.c2 + 1
         if free >= 4:
+            phone = _phone_template(g, lab, claimed) if _PHONE_LABEL.search(n) else None
+            if phone is not None:
+                fields.append(phone)  # 「電話」 with 「（　）　－」 printed in the rows under it
+                used_labels.add(lab)
+                continue
             box = under if under is not None else g.at(lab.r1, lab.c2 + 1)
             claimed.add(box)
             used_labels.add(lab)
@@ -804,8 +812,8 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set, stop_co
     if len(boxes) >= 2:
         return "split", boxes, prefix, suffixes
     b = boxes[0]
-    if not b.merged and "bottom" not in b.sides and len(b.sides) < 3:
-        return None  # a corner of a frame, not a box
+    if not b.merged and b.sides != {"bottom"} and len(b.sides) < 3:
+        return None  # a corner of a frame (┘ ┐), not a box; an underline 「＿」 is fine
     return "text", boxes, prefix, suffixes
 
 
@@ -935,6 +943,112 @@ def _comparison_fields(g: Grid, sheet: Sheet, regions: list[Region], used: set, 
 
 _ALL_SIDES = frozenset({"left", "right", "top", "bottom"})
 _TICKS = set(CHECKED_CHARS) | {"レ", "○", "〇"}
+
+
+_SEPARATORS = {"・", "･", "／", "/"}
+_PHONE_LABEL = re.compile(r"電話|ＴＥＬ|TEL|Tel|ファクス|ＦＡＸ|FAX")
+_DASHES = set("－-ー‐−―")
+
+
+def _phone_template(g: Grid, lab: Region, claimed: set) -> "Field | None":
+    """「電話」 with 「（　　）　　－」 printed in separate cells in the rows just under it."""
+    for r in range(lab.r2 + 1, lab.r2 + 4):
+        marks = []
+        c = lab.c1
+        while c <= min(g.max_col, lab.c1 + 40):
+            reg = g.at(r, c)
+            if reg is None:
+                break
+            t = reg.text if isinstance(reg.value, str) else ""
+            if t in ("（", "("):
+                marks = [reg]
+            elif marks and t in ("）", ")") and len(marks) == 1:
+                marks.append(reg)
+            elif len(marks) == 2 and t in _DASHES:
+                marks.append(reg)
+                break
+            elif not reg.empty:
+                marks = []
+            c = reg.c2 + 1
+        if len(marks) != 3:
+            continue
+        slots = []
+        for m in marks:
+            s = g.at(r, m.c2 + 1)
+            if s is None or not s.empty or s in claimed:
+                break
+            slots.append(s)
+        if len(slots) != 3:
+            continue
+        parts = [{"cell": s.ref, "suffix": suf} for s, suf in zip(slots, ("）", "－", None))]
+        parts[-1].pop("suffix")
+        f = Field("", lab.text, g.sheet.name, slots[0].ref, f"{marks[0].ref}:{make_ref(r, min(g.max_col, slots[2].c2 + 4))}",
+                  "split", parts=parts, template="（")
+        claimed.update(slots)
+        return f
+    return None
+
+
+def _circle_cell_fields(g: Grid, sheet: Sheet, regions: list[Region], used: set, claimed: set) -> list[Field]:
+    """「有 （[ ]年[ ]月[ ]日） ・ 無」: circle-one options printed in their own cells.
+
+    One choice field (the chosen option is written as 「（無）」) plus, when an option
+    is followed by date boxes, a date field 「…(有の場合の年月日)」.
+    """
+    out: list[Field] = []
+    by_row: dict[int, list[Region]] = {}
+    for reg in regions:
+        if not reg.empty and isinstance(reg.value, str) and reg not in claimed:
+            by_row.setdefault(reg.r1, []).append(reg)
+    for r, regs in sorted(by_row.items()):
+        regs.sort(key=lambda x: x.c1)
+        opts = [x for x in regs if normalize_label(x.text) in CIRCLE_VOCAB and x not in used]
+        seps = [x for x in regs if x.text.strip() in _SEPARATORS]
+        chain: list[Region] = []
+        for a in opts:
+            if chain and not any(chain[-1].c2 < s.c1 and s.c2 < a.c1 for s in seps):
+                chain = []
+            chain.append(a)
+        if len(chain) < 2:
+            continue
+        lab = None
+        c = chain[0].c1 - 1
+        while c >= 1:
+            reg = g.at(r, c)
+            if reg is None:
+                break
+            if not reg.empty:
+                lab = reg if is_label(reg, maxlen=120) else None
+                break
+            c = reg.c1 - 1
+        if lab is None:
+            continue
+        base = normalize_label(lab.text.split("\n")[0])
+        names = [normalize_label(x.text) for x in chain]
+        parts = [{"cell": x.ref, "option": n, "circle": True} for x, n in zip(chain, names)]
+        f = Field("", lab.text, sheet.name, chain[0].ref, f"{chain[0].ref}:{make_ref(chain[-1].r2, chain[-1].c2)}",
+                  "choice_cells", options=names, parts=parts)
+        f.id_hint = base
+        out.append(f)
+        used.add(lab)
+        claimed.add(lab)
+        for x in chain:
+            used.add(x)
+            claimed.add(x)
+        for s in seps:
+            used.add(s)
+        for i, x in enumerate(chain):
+            stop = chain[i + 1].c1 - 1 if i + 1 < len(chain) else None
+            res = _scan_right(g, x, r, claimed, used, stop_col=stop)
+            if res is None or res[0] != "split" or res[3][:2] != ["年", "月"]:
+                continue
+            kind, boxes, prefix, suffixes = res
+            d = _make_box_field(sheet, lab.text, kind, boxes, None, suffixes)
+            d.template = "日付"  # 「有 （[ ]年[ ]月[ ]日）」: the date that goes with 有
+            d.id_hint = f"{base}({names[i]}の場合の年月日)"
+            out.append(d)
+            claimed.update(boxes)
+    return out
 
 
 def _drawn_box_fields(g: Grid, sheet: Sheet, regions: list[Region], used: set, claimed: set) -> list[Field]:

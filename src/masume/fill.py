@@ -401,6 +401,7 @@ def _format_single(f: Field, value, wb: Workbook, mark: str, today):
 
 
 _ERA_SPLIT = {"令和", "平成", "昭和", "西暦"}
+_SEP_SUFFIXES = {"）", ")", "－", "-", "ー", "‐", "−", "―"}
 
 
 def _parts_warnings(f: Field, value, key: str, wareki: bool) -> list[str]:
@@ -463,8 +464,12 @@ def _fill_parts(f: Field, value, put, key: str, wareki: bool = False) -> None:
         parts = [parts[0][:3], parts[0][3:]]  # 郵便番号 1000001 -> 100 / 0001
     if len(parts) != n:
         raise FillError(f"expected {n} parts {[p.get('suffix') for p in f.parts]}, got {parts!r}")
+    # phone / postal parts stay text: a number too wide for a narrow cell shows as #### in Excel
+    textish = f.template == "（" or any((p.get("suffix") or "") in _SEP_SUFFIXES for p in f.parts)
     for p, v in zip(f.parts, parts):
-        put(f.sheet, p["cell"], _num(v) if isinstance(v, str) else v, key, f.id)
+        if textish and isinstance(v, int) and not isinstance(v, bool):
+            v = str(v)
+        put(f.sheet, p["cell"], v if textish or not isinstance(v, str) else _num(v), key, f.id)
 
 
 def _fill_choice_cells(f: Field, value, put, key: str, mark: str) -> None:
@@ -475,6 +480,10 @@ def _fill_choice_cells(f: Field, value, put, key: str, mark: str) -> None:
     if missing:
         raise FillError(f"option(s) not in form: {missing}")
     for p, o in zip(f.parts, opts):
+        if p.get("circle"):
+            if o in sel_n:
+                put(f.sheet, p["cell"], f"（{p['option']}）", key, f.id)  # 「無」 -> 「（無）」, as when circling on paper
+            continue
         if p.get("box"):
             if o in sel_n:
                 put(f.sheet, p["cell"], "✓", key, f.id)  # a drawn box gets a tick; others stay blank

@@ -1,6 +1,8 @@
 """Render an Excel 方眼紙 sheet into compact, LLM-friendly Markdown."""
 from __future__ import annotations
 
+import re
+
 from .detect import CHECKED_CHARS, Grid, detect_sheet
 from .ooxml import Workbook
 
@@ -45,18 +47,46 @@ def current_value(sheet, f):
         vals = [at(p["cell"]) for p in f.parts]
         if all(v in (None, "") for v in vals):
             return None
-        return "".join(f"{'' if v is None else v}{p.get('suffix') or ''}" for v, p in zip(vals, f.parts))
+        pre = f.template if f.template and f.template != "日付" else ""  # 令和8年12月, （082）251－1234
+        return pre + "".join(f"{'' if v is None else v}{p.get('suffix') or ''}" for v, p in zip(vals, f.parts))
     if f.kind == "checkbox":
         sid = f.parts[0]["control"] if f.parts else None
         return True if any(c.shape_id == sid and c.checked for c in sheet.controls) else None
     if f.kind == "choice_cells":
         marks = CHECKED_CHARS + "レ○〇"
+        if f.parts and f.parts[0].get("circle"):
+            return [p["option"] for p in f.parts
+                    if re.fullmatch(r"[（(○〇]\s*" + re.escape(p["option"]) + r"\s*[）)]?",
+                                    str(at(p["cell"]) or "").strip())] or None
         sel = [p["option"] for p in f.parts if (str(at(p["cell"]) or "").strip() or "-") in marks]  # "" is in every string
         return sel or None
     v = at(f.cell)
     if f.kind in ("inline_date", "pattern", "inline_text", "choice", "circle", "text") and f.template and v == f.template:
         return None  # still the printed placeholder
     return v
+
+
+def _context_after(g: Grid, f) -> str:
+    """The printed words right after the last box of a field (「月分（翌月10日納期限分）以降…」)."""
+    from .ooxml import parse_ref
+    r, c = parse_ref(f.parts[-1]["cell"])
+    reg = g.at(r, c)
+    c = (reg.c2 if reg is not None else c) + 1
+    seen = 0
+    while c <= g.max_col and seen < 4:
+        reg = g.at(r, c)
+        if reg is None:
+            break
+        if not reg.empty and isinstance(reg.value, str):
+            t = _SPACE_RUN.sub("", reg.text)
+            if len(t) > 1:
+                return t[:30]
+        seen += 0 if reg.empty else 1
+        c = reg.c2 + 1
+    return ""
+
+
+_SPACE_RUN = re.compile(r"[\s\u3000]+")
 
 
 def sheet_to_markdown(wb: Workbook, sheet_name: str | None = None, layout: bool = True,
@@ -73,6 +103,7 @@ def sheet_to_markdown(wb: Workbook, sheet_name: str | None = None, layout: bool 
     lines = [f"# {sheet.name}", ""]
 
     lines += ["## 入力欄", "", "| id | 種類 | セル | 補足 |", "|---|---|---|---|"]
+    grid = Grid(sheet, wb.styles)
     for f in fields:
         extra = ""
         if f.options:
@@ -97,9 +128,14 @@ def sheet_to_markdown(wb: Workbook, sheet_name: str | None = None, layout: bool 
             elif isinstance(v, list):
                 v = "・".join(map(str, v))
             extra = (extra + f" 現在値: {v}").strip()
+        if f.kind == "split" and f.template and f.parts and (f.template == "日付" or f.template in ("令和", "平成", "昭和", "西暦")):
+            ctx = _context_after(grid, f)
+            if ctx:
+                extra = (extra + f" 続き: {ctx}").strip()  # 「日付#2」 alone does not say which date this is
         if f.section:
             extra = (f"[{f.section}] " + extra).strip()
-        lines.append(f"| {_cell_md(f.id)} | {KIND_JA.get(f.kind, f.kind)} | {f.range} | {_cell_md(extra)} |")
+        kind = "選択(○で囲む)" if f.kind == "choice_cells" and f.parts and f.parts[0].get("circle") else KIND_JA.get(f.kind, f.kind)
+        lines.append(f"| {_cell_md(f.id)} | {kind} | {f.range} | {_cell_md(extra)} |")
     if not fields:
         lines.append("| (検出なし) | | | |")
     lines.append("")

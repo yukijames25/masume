@@ -201,7 +201,7 @@ const fillCases = [
     expect: { '本紙!H9': '駐車場利用', '本紙!H6': '総務部' } },
   { src: 'tests/fixtures_hard/kintou.xlsx', data: {
     宛名: '株式会社〇〇', 氏名: '佐藤 花子', 年齢: 28, 勤続年数: '5年3ヶ月', 電話番号: '090-1234-5678', 性別: '女性', 郵便番号: '1000001' },
-    expect: { '申込書!H8': 5, '申込書!K8': 3, '申込書!H9': '090', '申込書!M9': 1234, '申込書!R9': 5678, '申込書!H10': '□', '申込書!L10': '■' } },
+    expect: { '申込書!H8': 5, '申込書!K8': 3, '申込書!H9': '090', '申込書!M9': '1234', '申込書!R9': '5678', '申込書!H10': '□', '申込書!L10': '■' } },
   { src: 'tests/fixtures_hard/kintou.xlsx', data: { 氏名: '佐藤 花子' }, expect: { '申込書!H6': '佐藤 花子' } },
   { src: 'tests/fixtures_hard/underline.xlsx', data: { 住所: '東京都', 氏名: '山田' } },
   // tests/test_hard.py DogfoodRegressionTests
@@ -222,12 +222,14 @@ const fillCases = [
     expect: { '変更届!F8': '山田' } },
   { src: 'tests/fixtures_hard/checkbox_controls.xlsx', data: { '名称変更/社名変更': 'たぶん' }, errors: true },
   { src: 'tests/fixtures_hard/henko_todoke.xlsx', data: { '所在地（住所）/変更後': '広島市南区1-2-3', '所在地（住所）(〒)/変更後': '732-0001', '電話番号/変更後': '082-111-2222' },
-    expect: { '変更届!R10': '広島市南区1-2-3', '変更届!S9': '732-0001', '変更届!S11': '082', '変更届!V11': 111, '変更届!Y11': 2222 } },
+    expect: { '変更届!R10': '広島市南区1-2-3', '変更届!S9': '732-0001', '変更届!S11': '082', '変更届!V11': '111', '変更届!Y11': '2222' } },
   { src: 'tests/fixtures_hard/box_choice.xlsx', data: { '受取方法/変更前': '書面', '受取方法/変更後': '電子データ' }, expect: { '申出書!P4': '✓', '申出書!X4': '✓' } },
   { src: 'tests/fixtures_hard/box_choice.xlsx', data: { '受取方法/変更前': '郵送' }, errors: true },
   { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: '2026-12' }, expect: { '届出書!D15': 8, '届出書!G15': 12 } },
   { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: 'R8.12' }, expect: { '届出書!D15': 8, '届出書!G15': 12 } },
   { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: [2026, 12, 1] }, errors: true },
+  { src: 'tests/fixtures_hard/uwamu_tel.xlsx', data: { 取り消されたことの有無: '有', '取り消されたことの有無(有の場合の年月日)': '2026-03-31', 電話: '082-251-1234' },
+    expect: { '申請書!J2': '（有）', '申請書!L2': 8, '申請書!O2': 3, '申請書!R2': 31, '申請書!F7': '082', '申請書!H7': '251', '申請書!J7': '1234' } },
   // tests/test_safety.py (fixtures_review: files saved by real Excel)
   { src: 'tests/fixtures_review/base.xlsx', data: { A11: 'x', A12: 'y', A14: 'z' }, expect: { 'Sheet1!A11': 'x', 'Sheet1!A12': 'y', 'Sheet1!A14': 'z' } },
   { src: 'tests/fixtures_review/empty.xlsx', data: { A1: 'a', B3: 'b', C2: 'c' }, expect: { 'Sheet1!A1': 'a', 'Sheet1!B3': 'b', 'Sheet1!C2': 'c' } },

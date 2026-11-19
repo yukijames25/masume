@@ -1727,6 +1727,9 @@ function detectSheet(sheet, styles) {
   // ---- 0. check boxes drawn as boxed cells: [ ]電子データ [ ]書面
   fields.push(...drawnBoxFields(g, sheet, regions, usedLabels, claimed));
 
+  // ---- 0a. 「有 （[ ]年[ ]月[ ]日） ・ 無」: options in separate cells
+  fields.push(...circleCellFields(g, sheet, regions, usedLabels, claimed));
+
   // ---- 0b. comparison grids: 事項 | 変更前 | 変更後
   fields.push(...comparisonFields(g, sheet, regions, usedLabels, claimed));
 
@@ -1978,6 +1981,8 @@ function detectSheet(sheet, styles) {
       c = reg.c2 + 1;
     }
     if (free >= 4) {
+      const phone = RE_PHONE_LABEL.test(n) ? phoneTemplate(g, lab, claimed) : null;
+      if (phone !== null) { fields.push(phone); usedLabels.add(lab); continue; } // 「電話」 with 「（　）　－」 under it
       const box = under !== null ? under : g.at(lab.r1, lab.c2 + 1);
       claimed.add(box);
       usedLabels.add(lab);
@@ -2092,7 +2097,7 @@ function scanRight(g, lab, row, claimed, used, stopCol = null) {
   }
   if (boxes.length >= 2) return ['split', boxes, prefix, suffixes];
   const b0 = boxes[0];
-  if (!b0.merged && !b0.sides.has('bottom') && sideList(b0).length < 3) return null; // a corner of a frame
+  if (!b0.merged && !(b0.sides.size === 1 && b0.sides.has('bottom')) && sideList(b0).length < 3) return null; // a corner of a frame (┘ ┐); an underline is fine
   return ['text', boxes, prefix, suffixes];
 }
 
@@ -2205,6 +2210,93 @@ function comparisonFields(g, sheet, regions, used, claimed) {
 }
 
 const TICKS = new Set([...CHECKED_CHARS, 'レ', '○', '〇']);
+const SEPARATORS = new Set(['・', '･', '／', '/']);
+const RE_PHONE_LABEL = /電話|ＴＥＬ|TEL|Tel|ファクス|ＦＡＸ|FAX/u;
+const DASHES = new Set([...'－-ー‐−―']);
+/** 「電話」 with 「（　　）　　－」 printed in separate cells in the rows just under it. */
+function phoneTemplate(g, lab, claimed) {
+  for (let r = lab.r2 + 1; r < lab.r2 + 4; r++) {
+    let marks = [];
+    let c = lab.c1;
+    while (c <= Math.min(g.maxCol, lab.c1 + 40)) {
+      const reg = g.at(r, c);
+      if (reg === null) break;
+      const t = isStr(reg.value) ? reg.text : '';
+      if (t === '（' || t === '(') marks = [reg];
+      else if (marks.length === 1 && (t === '）' || t === ')')) marks.push(reg);
+      else if (marks.length === 2 && DASHES.has(t)) { marks.push(reg); break; }
+      else if (!reg.empty) marks = [];
+      c = reg.c2 + 1;
+    }
+    if (marks.length !== 3) continue;
+    const slots = [];
+    for (const m of marks) {
+      const s = g.at(r, m.c2 + 1);
+      if (s === null || !s.empty || claimed.has(s)) break;
+      slots.push(s);
+    }
+    if (slots.length !== 3) continue;
+    const parts = [{ cell: slots[0].ref, suffix: '）' }, { cell: slots[1].ref, suffix: '－' }, { cell: slots[2].ref }];
+    const f = new Field('', lab.text, g.sheet.name, slots[0].ref, `${marks[0].ref}:${makeRef(r, Math.min(g.maxCol, slots[2].c2 + 4))}`,
+      'split', { parts, template: '（' });
+    claimed.addAll(slots);
+    return f;
+  }
+  return null;
+}
+/**
+ * 「有 （[ ]年[ ]月[ ]日） ・ 無」: circle-one options printed in their own cells.
+ * One choice field (written as 「（無）」) plus a date field 「…(有の場合の年月日)」 when date boxes follow an option.
+ */
+function circleCellFields(g, sheet, regions, used, claimed) {
+  const out = [];
+  const byRow = new Map();
+  for (const reg of regions) {
+    if (!reg.empty && isStr(reg.value) && !claimed.has(reg)) { if (!byRow.has(reg.r1)) byRow.set(reg.r1, []); byRow.get(reg.r1).push(reg); }
+  }
+  for (const r of [...byRow.keys()].sort((a, b) => a - b)) {
+    const regs = byRow.get(r).sort((a, b) => a.c1 - b.c1);
+    const opts = regs.filter((x) => CIRCLE_VOCAB.has(normalizeLabel(x.text)) && !used.has(x));
+    const seps = regs.filter((x) => SEPARATORS.has(stripWS(x.text)));
+    let chain = [];
+    for (const a of opts) {
+      if (chain.length && !seps.some((s) => chain[chain.length - 1].c2 < s.c1 && s.c2 < a.c1)) chain = [];
+      chain.push(a);
+    }
+    if (chain.length < 2) continue;
+    let lab = null;
+    let c = chain[0].c1 - 1;
+    while (c >= 1) {
+      const reg = g.at(r, c);
+      if (reg === null) break;
+      if (!reg.empty) { lab = isLabel(reg, 120) ? reg : null; break; }
+      c = reg.c1 - 1;
+    }
+    if (lab === null) continue;
+    const base = normalizeLabel(lab.text.split('\n')[0]);
+    const names = chain.map((x) => normalizeLabel(x.text));
+    const parts = chain.map((x, i) => ({ cell: x.ref, option: names[i], circle: true }));
+    const last = chain[chain.length - 1];
+    const f = new Field('', lab.text, sheet.name, chain[0].ref, `${chain[0].ref}:${makeRef(last.r2, last.c2)}`, 'choice_cells', { options: names, parts });
+    f.id_hint = base;
+    out.push(f);
+    used.add(lab); claimed.add(lab);
+    for (const x of chain) { used.add(x); claimed.add(x); }
+    for (const s of seps) used.add(s);
+    chain.forEach((x, i) => {
+      const stop = i + 1 < chain.length ? chain[i + 1].c1 - 1 : null;
+      const res = scanRight(g, x, r, claimed, used, stop);
+      if (res === null || res[0] !== 'split' || res[3][0] !== '年' || res[3][1] !== '月') return;
+      const [kind, boxes, , suffixes] = res;
+      const d = makeBoxField(sheet, lab.text, kind, boxes, null, suffixes);
+      d.template = '日付'; // 「有 （[ ]年[ ]月[ ]日）」: the date that goes with 有
+      d.id_hint = `${base}(${names[i]}の場合の年月日)`;
+      out.push(d);
+      claimed.addAll(boxes);
+    });
+  }
+  return out;
+}
 /**
  * [□] drawn as a small boxed cell, its caption to the right: 「[ ] 電子データ  [ ] 書面」.
  * Two or more on one row make one choice field; a repeated caption starts a new group (変更前 / 変更後).
@@ -2813,6 +2905,7 @@ function formatFieldValue(wb, f, value, mark = '■', today = null) {
 
 const RE_DIGIT_STRIP = new RegExp(`[-－ー‐−${WS}　]`, 'gu');
 const ERA_SPLIT = new Set(['令和', '平成', '昭和', '西暦']);
+const SEP_SUFFIXES = new Set(['）', ')', '－', '-', 'ー', '‐', '−', '―']);
 /** Things a person should double-check on paper (dogfood: 8 digits in 9 boxes went unnoticed). */
 function partsWarnings(f, value, key, wareki) {
   const out = [];
@@ -2869,7 +2962,13 @@ function fillParts(f, value, put, key, wareki = false) {
     parts = [parts[0].slice(0, 3), parts[0].slice(3)]; // 郵便番号 1000001 -> 100 / 0001
   }
   if (parts.length !== n) throw new FillError(`${n}個に分けて指定してください（区切り: ${f.parts.map((x) => x.suffix ?? '-').join(', ')}）: ${pyRepr(parts)}`);
-  f.parts.forEach((p, k) => put(f.sheet, p.cell, isStr(parts[k]) ? num(parts[k]) : parts[k], key, f.id));
+  // phone / postal parts stay text: a number too wide for a narrow cell shows as #### in Excel
+  const textish = f.template === '（' || f.parts.some((p) => SEP_SUFFIXES.has(p.suffix || ''));
+  f.parts.forEach((p, k) => {
+    let v = parts[k];
+    if (textish && typeof v === 'number' && Number.isInteger(v)) v = String(v);
+    put(f.sheet, p.cell, textish || !isStr(v) ? v : num(v), key, f.id);
+  });
 }
 
 function fillChoiceCells(f, value, put, key, mark) {
@@ -2883,6 +2982,7 @@ function fillChoiceCells(f, value, put, key, mark) {
   const missing = selN.filter((s) => !opts.includes(s));
   if (missing.length) throw new FillError(`フォームにない選択肢です: ${missing.join(', ')}`);
   f.parts.forEach((p, k) => {
+    if (p.circle) { if (selN.includes(opts[k])) put(f.sheet, p.cell, `（${p.option}）`, key, f.id); return; } // 「無」 -> 「（無）」
     if (p.box) { if (selN.includes(opts[k])) put(f.sheet, p.cell, '✓', key, f.id); return; } // drawn box: tick, others stay blank
     put(f.sheet, p.cell, selN.includes(opts[k]) ? mark : '□', key, f.id);
   });
@@ -3105,11 +3205,16 @@ function currentValue(sheet, f) {
   if (f.kind === 'split') {
     const vals = f.parts.map((p) => at(p.cell));
     if (vals.every((v) => v === null || v === '')) return null;
-    return vals.map((v, i) => `${v === null ? '' : pyStr(v)}${f.parts[i].suffix || ''}`).join('');
+    const pre = f.template && f.template !== '日付' ? f.template : ''; // 令和8年12月, （082）251－1234
+    return pre + vals.map((v, i) => `${v === null ? '' : pyStr(v)}${f.parts[i].suffix || ''}`).join('');
   }
   if (f.kind === 'checkbox') {
     const sid = f.parts.length ? f.parts[0].control : undefined;
     return sheet.controls.some((c) => c.shape_id === sid && c.checked) ? true : null;
+  }
+  if (f.kind === 'choice_cells' && f.parts.length && f.parts[0].circle) {
+    const sel = f.parts.filter((p) => new RegExp(`^[（(○〇][${WS}]*${escapeRe(p.option)}[${WS}]*[）)]?$`, 'u').test(stripWS(pyStr(at(p.cell) ?? '')))).map((p) => p.option);
+    return sel.length ? sel : null;
   }
   if (f.kind === 'choice_cells') {
     const sel = f.parts.filter((p) => { const v = at(p.cell); return (CHECKED_CHARS + 'レ○〇').includes((pyTruthy(v) ? stripWS(pyStr(v)) : '') || '-'); /* '' is in every string */ }).map((p) => p.option);
@@ -3120,6 +3225,24 @@ function currentValue(sheet, f) {
   return v;
 }
 /** With *fields* (saved before filling) ids stay stable and current values are shown. */
+/** The printed words right after the last box of a field (「月分（翌月10日納期限分）以降…」). */
+function contextAfter(g, f) {
+  let [r, c] = parseRef(f.parts[f.parts.length - 1].cell);
+  const first = g.at(r, c);
+  c = (first !== null ? first.c2 : c) + 1;
+  let seen = 0;
+  while (c <= g.maxCol && seen < 4) {
+    const reg = g.at(r, c);
+    if (reg === null) break;
+    if (!reg.empty && isStr(reg.value)) {
+      const t = reg.text.replace(/[\s\u3000]+/gu, '');
+      if (cpLen(t) > 1) return [...t].slice(0, 30).join('');
+    }
+    seen += reg.empty ? 0 : 1;
+    c = reg.c2 + 1;
+  }
+  return '';
+}
 function sheetToMarkdown(wb, sheetName = null, layout = true, savedFields = null) {
   const sheet = wb.sheet(sheetName);
   let fields;
@@ -3130,6 +3253,7 @@ function sheetToMarkdown(wb, sheetName = null, layout = true, savedFields = null
   }
   const lines = [`# ${sheet.name}`, ''];
   lines.push('## 入力欄', '', '| id | 種類 | セル | 補足 |', '|---|---|---|---|');
+  const grid = new Grid(sheet, wb.styles);
   for (const f of fields) {
     let extra = '';
     if (f.options.length) extra = '選択肢: ' + f.options.join(' / ');
@@ -3148,8 +3272,13 @@ function sheetToMarkdown(wb, sheetName = null, layout = true, savedFields = null
       else if (Array.isArray(v)) v = v.map(pyStr).join('・');
       extra = stripWS(extra + ` 現在値: ${pyStr(v)}`);
     }
+    if (f.kind === 'split' && f.template && f.parts.length && ['日付', '令和', '平成', '昭和', '西暦'].includes(f.template)) {
+      const ctx = contextAfter(grid, f);
+      if (ctx) extra = stripWS(extra + ` 続き: ${ctx}`); // 「日付#2」 alone does not say which date this is
+    }
     if (f.section) extra = stripWS(`[${f.section}] ` + extra);
-    lines.push(`| ${cellMd(f.id)} | ${KIND_JA[f.kind] ?? f.kind} | ${f.range} | ${cellMd(extra)} |`);
+    const kind = f.kind === 'choice_cells' && f.parts.length && f.parts[0].circle ? '選択(○で囲む)' : (KIND_JA[f.kind] ?? f.kind);
+    lines.push(`| ${cellMd(f.id)} | ${kind} | ${f.range} | ${cellMd(extra)} |`);
   }
   if (!fields.length) lines.push('| (検出なし) | | | |');
   lines.push('');

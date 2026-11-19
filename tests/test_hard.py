@@ -127,7 +127,7 @@ class HardFixtureTests(unittest.TestCase):
         })
         s = wb.sheet()
         self.assertEqual((s.value(8, 8), s.value(8, 11)), (5, 3))
-        self.assertEqual((s.value(9, 8), s.value(9, 13), s.value(9, 18)), ("090", 1234, 5678))
+        self.assertEqual((s.value(9, 8), s.value(9, 13), s.value(9, 18)), ("090", "1234", "5678"))
         self.assertEqual((s.value(10, 8), s.value(10, 12)), ("□", "■"))
 
     def test_underline_form(self):
@@ -308,7 +308,7 @@ class ComparisonGridTests(unittest.TestCase):
             sh = load(out).sheet("変更届")
             self.assertEqual(sh.value(10, 18), "広島市南区1-2-3")
             self.assertEqual(sh.value(9, 19), "732-0001")
-            self.assertEqual([sh.value(11, c) for c in (19, 22, 25)], ["082", 111, 2222])
+            self.assertEqual([sh.value(11, c) for c in (19, 22, 25)], ["082", "111", "2222"])
         finally:
             shutil.rmtree(tmp)
 
@@ -390,5 +390,32 @@ class EraYearMonthTests(unittest.TestCase):
                 self.assertEqual([sh.value(15, c) for c in (4, 7, 10)], [8, 12, None], v)
             rep = fill(self.path, os.path.join(tmp, "x.xlsx"), {"日付": [2026, 12, 1]})
             self.assertTrue(rep.errors)  # a western year never goes into an era box
+        finally:
+            shutil.rmtree(tmp)
+
+
+class SeparateCellLayoutTests(unittest.TestCase):
+    """「有 （[ ]年[ ]月[ ]日） ・ 無」 and 「電話」+「（　）　－」 (second stand-in user test)."""
+
+    path = os.path.join(FX, "uwamu_tel.xlsx")
+
+    def test_fill_and_read_back(self):
+        from masume.render import current_value
+        fields = detect(load(self.path))
+        f = {x.id: x for x in fields}
+        self.assertEqual(f["取り消されたことの有無"].options, ["有", "無"])
+        tmp = tempfile.mkdtemp()
+        try:
+            out = os.path.join(tmp, "o.xlsx")
+            rep = fill(self.path, out, {"取り消されたことの有無": "有", "取り消されたことの有無(有の場合の年月日)": "2026-03-31",
+                                        "電話": "082-251-1234"})
+            self.assertEqual(rep.errors, [])
+            sh = load(out).sheet("申請書")
+            self.assertEqual(sh.value(2, 10), "（有）")
+            self.assertEqual(sh.value(2, 23), "無")  # the other option is left as printed
+            self.assertEqual([sh.value(2, c) for c in (12, 15, 18)], [8, 3, 31])  # 和暦 year: the sheet prints 令和
+            self.assertEqual([sh.value(7, c) for c in (6, 8, 10)], ["082", "251", "1234"])
+            self.assertEqual(current_value(sh, f["取り消されたことの有無"]), ["有"])
+            self.assertEqual(current_value(sh, f["電話"]), "（082）251－1234")
         finally:
             shutil.rmtree(tmp)

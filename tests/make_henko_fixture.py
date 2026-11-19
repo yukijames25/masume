@@ -85,6 +85,25 @@ def build_boxes(path):
     wb.save(path)
 
 
+def build_misc(path):
+    """「有 （[ ]年[ ]月[ ]日） ・ 無」 in separate cells, and 「電話」 with 「（　）　－」 printed under it."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "申請書"
+    for c in range(1, 30):
+        ws.column_dimensions[get_column_letter(c)].width = 2.6
+    ws["B1"] = "令和　年　月　日"
+    put(ws, "B2:H3", "取り消されたことの有無")
+    for ref, v in (("J2", "有"), ("K2", "（"), ("N2", "年"), ("Q2", "月"), ("T2", "日"), ("U2", "）"), ("V2", "・"), ("W2", "無")):
+        ws[ref] = v
+    for rng in ("L2:M2", "O2:P2", "R2:S2"):
+        ws.merge_cells(rng)
+    put(ws, "B6:D6", "電話", box=False)
+    for ref, v in (("E7", "（"), ("G7", "）"), ("I7", "－")):
+        ws[ref] = v
+    wb.save(path)
+
+
 if __name__ == "__main__":
     os.makedirs(HERE, exist_ok=True)
     out = os.path.join(HERE, "henko_todoke.xlsx")
@@ -92,4 +111,7 @@ if __name__ == "__main__":
     print("wrote", out)
     out = os.path.join(HERE, "box_choice.xlsx")
     build_boxes(out)
+    print("wrote", out)
+    out = os.path.join(HERE, "uwamu_tel.xlsx")
+    build_misc(out)
     print("wrote", out)
