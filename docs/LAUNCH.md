@@ -1,5 +1,7 @@
 # 公開用記事の下書き（Zenn / Qiita 向け）
 
+> **投稿用の完成版は [article_zenn.md](article_zenn.md)**（2026-11-19、実在様式・代役テストの結果を反映）。以下は最初の下書きとチェックリスト。
+
 > 公開前に、競合の再確認（GitHub / PyPI / npm で「方眼紙」「excel form fill mcp」を検索）と、実在する様式での動作確認をしてください。
 
 ---
@@ -69,4 +71,5 @@ $ masume fill 休暇届.xlsx values.json -o 休暇届_記入済.xlsx
 - [ ] PyPI 名 `masume` の空きを確認
 - [ ] README のスクリーンショット（ブラウザ版のサンプル）
 - [x] 実在の自治体様式で動作確認（広島市の6件、結果は docs/REAL_FORMS.md）。記事に様式の画像を載せるなら利用規約を確認すること
-- [ ] Zenn に記事、X で告知、Claude の MCP / Skill ディレクトリに登録
+- [x] 記事を投稿できる形に仕上げた（docs/article_zenn.md）
+- [ ] Zenn に投稿、X で告知、Claude の MCP / Skill ディレクトリに登録
