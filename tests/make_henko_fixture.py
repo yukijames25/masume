@@ -104,6 +104,29 @@ def build_misc(path):
     wb.save(path)
 
 
+def build_meisai(path):
+    """6か月の明細表: 「年　月」 ([ ]・[ ]) + 人/円 twice, told apart by the captions above."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "明細"
+    for c in range(1, 20):
+        ws.column_dimensions[get_column_letter(c)].width = 2.6
+    put(ws, "B2:D3", "月区分")
+    put(ws, "F2:I2", "支給人員・支給額", box=False)
+    put(ws, "F3:I3", "（臨時雇用者を除く。）", box=False)
+    put(ws, "L2:O2", "臨時雇用者の", box=False)
+    put(ws, "L3:O3", "支給人員・支給額", box=False)
+    for c in range(5, 17):
+        ws.cell(2, c).border = Border(top=T)
+    put(ws, "B4:D4", "年　月")
+    put(ws, "E4:F4", "人"); put(ws, "G4:J4", "円"); put(ws, "K4:L4", "人"); put(ws, "M4:P4", "円")
+    for r in range(5, 9):
+        put(ws, f"B{r}"); ws[f"C{r}"] = "・"; put(ws, f"D{r}")
+        for rng in ("E{r}:F{r}", "G{r}:J{r}", "K{r}:L{r}", "M{r}:P{r}"):
+            put(ws, rng.format(r=r))
+    wb.save(path)
+
+
 if __name__ == "__main__":
     os.makedirs(HERE, exist_ok=True)
     out = os.path.join(HERE, "henko_todoke.xlsx")
@@ -114,4 +137,7 @@ if __name__ == "__main__":
     print("wrote", out)
     out = os.path.join(HERE, "uwamu_tel.xlsx")
     build_misc(out)
+    print("wrote", out)
+    out = os.path.join(HERE, "meisai.xlsx")
+    build_meisai(out)
     print("wrote", out)

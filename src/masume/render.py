@@ -66,7 +66,15 @@ def current_value(sheet, f):
     return v
 
 
-def _context_after(g: Grid, f) -> str:
+def _field_cells(fields) -> set:
+    out = set()
+    for f in fields:
+        out.add(f.cell)
+        out.update(p["cell"] for p in f.parts if "cell" in p)
+    return out
+
+
+def _context_after(g: Grid, f, skip: set = frozenset()) -> str:
     """The printed words right after the last box of a field (「月分（翌月10日納期限分）以降…」)."""
     from .ooxml import parse_ref
     r, c = parse_ref(f.parts[-1]["cell"])
@@ -77,7 +85,7 @@ def _context_after(g: Grid, f) -> str:
         reg = g.at(r, c)
         if reg is None:
             break
-        if not reg.empty and isinstance(reg.value, str):
+        if not reg.empty and isinstance(reg.value, str) and reg.ref not in skip:  # not another field's value
             t = _SPACE_RUN.sub("", reg.text)
             if len(t) > 1:
                 return t[:30]
@@ -104,6 +112,7 @@ def sheet_to_markdown(wb: Workbook, sheet_name: str | None = None, layout: bool 
 
     lines += ["## 入力欄", "", "| id | 種類 | セル | 補足 |", "|---|---|---|---|"]
     grid = Grid(sheet, wb.styles)
+    skip = _field_cells(fields)
     for f in fields:
         extra = ""
         if f.options:
@@ -129,7 +138,7 @@ def sheet_to_markdown(wb: Workbook, sheet_name: str | None = None, layout: bool 
                 v = "・".join(map(str, v))
             extra = (extra + f" 現在値: {v}").strip()
         if f.kind == "split" and f.template and f.parts and (f.template == "日付" or f.template in ("令和", "平成", "昭和", "西暦")):
-            ctx = _context_after(grid, f)
+            ctx = _context_after(grid, f, skip)
             if ctx:
                 extra = (extra + f" 続き: {ctx}").strip()  # 「日付#2」 alone does not say which date this is
         if f.section:

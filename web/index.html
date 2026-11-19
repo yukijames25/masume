@@ -2082,6 +2082,10 @@ function scanRight(g, lab, row, claimed, used, stopCol = null) {
   }
   if (!boxes.length) return null;
   const singleCells = boxes.filter((b) => !b.merged);
+  if (singleCells.length && singleCells.length === boxes.length && boxes.length >= 2) {
+    const underline = boxes.filter((b) => b.sides.size === 1 && b.sides.has('bottom')).length;
+    if (!boxes.some((b) => b.sides.size >= 3) && underline * 2 <= boxes.length) return null; // 「┘└」 corners and edges of a frame
+  }
   if (boxes.length >= 2 && !singleCells.length && suffixes.every((s) => s === null) &&
       new Set(boxes.map((b) => `${b.width},${b.r1},${b.r2}`)).size === 1) {
     // [ ][ ][ ] one merged box per character (法人番号); few or wide boxes: keep the first only
@@ -2516,15 +2520,35 @@ function detectTables(g, regions) {
       else { if (run.length >= 2) runs.push(run); run = isHeader(reg) ? [reg] : []; }
     }
     if (run.length >= 2) runs.push(run);
-    for (const hdr of runs) {
+    for (let hdr of runs) {
       const res = tableBody(g, hdr);
       if (res === null) continue;
-      const [bodyRows, bodyRegs] = res;
-      const cols = hdr.map((h) => ({ id: normalizeLabel(h.text), label: h.text, col: idxToCol(h.c1) }));
+      let [bodyRows, bodyRegs] = res;
+      let cols = hdr.map((h) => ({ id: normalizeLabel(h.text), label: h.text, col: idxToCol(h.c1) }));
+      const ids = cols.map((c) => c.id);
+      if (new Set(ids).size < ids.length) { // 人 / 円 / 人 / 円: name them after the caption above
+        cols.forEach((c, i) => { const grp = groupAbove(g, hdr[i]); if (grp) c.id = `${grp}/${c.id}`; });
+      }
+      const ym = yearMonthColumn(g, hdr[0], bodyRows);
+      if (ym !== null) {
+        const [ymRegs, ymCols, ymHead] = ym;
+        cols = ymCols.concat(cols);
+        bodyRegs = [...bodyRegs, ...ymRegs];
+        hdr = [ymHead, ...hdr];
+      }
       let label = null;
       const above = g.at(hdr[0].r1 - 1, hdr[0].c1);
       const span = hdr[hdr.length - 1].c2 - hdr[0].c1 + 1;
       if (above !== null && isLabel(above) && above.width * 2 >= span) label = above.text;
+      if (label === null) {
+        let c = hdr[0].c1 - 1; // the caption on the left of the rows: 「最近6か月間における…明細」
+        while (c >= 1) {
+          const left = g.at(hdr[0].r1, c);
+          if (left === null) break;
+          if (!left.empty) { if (left.merged && isLabel(left, 80) && cpLen(normalizeLabel(left.text)) >= 6) label = left.text; break; }
+          c = left.c1 - 1;
+        }
+      }
       if (label === null) {
         label = hdr[0].text;
         for (const h of hdr) if (cpLen(h.text) > cpLen(label)) label = h.text;
@@ -2542,6 +2566,44 @@ function detectTables(g, regions) {
   return out;
 }
 const HEADER_EXCLUDE = new Set(['－', '-', '〒', '～', '・']);
+/** Captions stacked above a table header cell: 「支給人員・支給額」+「（臨時雇用者を除く。）」. */
+function groupAbove(g, h) {
+  const found = [];
+  for (let r = h.r1 - 1; r > Math.max(h.r1 - 4, 0); r--) {
+    let hit = null;
+    for (let c = h.c1; c <= h.c2; c++) {
+      const reg = g.at(r, c);
+      if (reg !== null && reg.r2 === r && !reg.empty && isStr(reg.value) && isLabel(reg, 60)) { hit = reg; break; }
+    }
+    if (hit === null) break;
+    found.push(hit.text.replace(RE_SPACES, '')); // keep 「（臨時雇用者を除く。）」 as printed
+    if (hit.sides.has('top')) break; // top of the header block
+  }
+  return found.reverse().join('');
+}
+/** 「年　月」 left of a table: each row has [ ]・[ ] (year, month) in that column. */
+function yearMonthColumn(g, first, bodyRows) {
+  const head = g.at(first.r1, first.c1 - 1);
+  if (head === null || head.empty || !isStr(head.value) || normalizeLabel(head.text) !== '年月') return null;
+  let cols = null;
+  const regs = [];
+  for (const r of bodyRows) {
+    const boxes = [];
+    let c = head.c1;
+    while (c <= head.c2) {
+      const reg = g.at(r, c);
+      if (reg === null) return null;
+      if (reg.r1 === r && reg.empty && (reg.merged || reg.bordered)) boxes.push(reg);
+      c = reg.c2 + 1;
+    }
+    if (boxes.length !== 2) return null;
+    const here = boxes.map((b) => b.c1);
+    if (cols !== null && (here[0] !== cols[0] || here[1] !== cols[1])) return null;
+    cols = here;
+    regs.push(...boxes);
+  }
+  return [regs, [{ id: '年', label: '年', col: idxToCol(cols[0]) }, { id: '月', label: '月', col: idxToCol(cols[1]) }], head];
+}
 function isHeader(reg) {
   if (reg.empty || reg.formula || !isStr(reg.value)) return false;
   const t = reg.text;
@@ -3123,8 +3185,12 @@ async function fill(wb, data, opts = {}) {
         fillParts(f, value, put, key, wareki);
         report.warnings.push(...partsWarnings(f, value, key, wareki));
       }
-      else if (f.kind === 'choice_cells') fillChoiceCells(f, value, put, key, mark);
-      else if (f.kind === 'checkbox') {
+      else if (f.kind === 'choice_cells') {
+        fillChoiceCells(f, value, put, key, mark);
+        if (f.parts.length && f.parts[0].circle) {
+          report.warnings.push(`${key}: ○で囲む欄なので、選んだ語を「（${normalizeLabel(pyStr(isStr(value) ? value : value[0]))}）」と書きました。丸囲みが必要な提出先なら、印刷後に手で丸を付けてください`);
+        }
+      } else if (f.kind === 'checkbox') {
         const ctl = controlOf(wb, f);
         const on = truthy(value, f);
         controls.set(ctl.shape_id, [ctl, on]);
@@ -3226,7 +3292,12 @@ function currentValue(sheet, f) {
 }
 /** With *fields* (saved before filling) ids stay stable and current values are shown. */
 /** The printed words right after the last box of a field (「月分（翌月10日納期限分）以降…」). */
-function contextAfter(g, f) {
+function fieldCells(fields) {
+  const out = new Set();
+  for (const f of fields) { out.add(f.cell); for (const p of f.parts) if (p.cell) out.add(p.cell); }
+  return out;
+}
+function contextAfter(g, f, skip = new Set()) {
   let [r, c] = parseRef(f.parts[f.parts.length - 1].cell);
   const first = g.at(r, c);
   c = (first !== null ? first.c2 : c) + 1;
@@ -3234,7 +3305,7 @@ function contextAfter(g, f) {
   while (c <= g.maxCol && seen < 4) {
     const reg = g.at(r, c);
     if (reg === null) break;
-    if (!reg.empty && isStr(reg.value)) {
+    if (!reg.empty && isStr(reg.value) && !skip.has(reg.ref)) { // not another field's value
       const t = reg.text.replace(/[\s\u3000]+/gu, '');
       if (cpLen(t) > 1) return [...t].slice(0, 30).join('');
     }
@@ -3254,6 +3325,7 @@ function sheetToMarkdown(wb, sheetName = null, layout = true, savedFields = null
   const lines = [`# ${sheet.name}`, ''];
   lines.push('## 入力欄', '', '| id | 種類 | セル | 補足 |', '|---|---|---|---|');
   const grid = new Grid(sheet, wb.styles);
+  const skip = fieldCells(fields);
   for (const f of fields) {
     let extra = '';
     if (f.options.length) extra = '選択肢: ' + f.options.join(' / ');
@@ -3273,7 +3345,7 @@ function sheetToMarkdown(wb, sheetName = null, layout = true, savedFields = null
       extra = stripWS(extra + ` 現在値: ${pyStr(v)}`);
     }
     if (f.kind === 'split' && f.template && f.parts.length && ['日付', '令和', '平成', '昭和', '西暦'].includes(f.template)) {
-      const ctx = contextAfter(grid, f);
+      const ctx = contextAfter(grid, f, skip);
       if (ctx) extra = stripWS(extra + ` 続き: ${ctx}`); // 「日付#2」 alone does not say which date this is
     }
     if (f.section) extra = stripWS(`[${f.section}] ` + extra);

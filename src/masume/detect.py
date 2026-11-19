@@ -796,6 +796,10 @@ def _scan_right(g: Grid, lab: Region, row: int, claimed: set, used: set, stop_co
         return None
     # trim trailing boxes that are not followed by a unit when we have a split
     single_cells = [b for b in boxes if not b.merged]
+    if single_cells and len(single_cells) == len(boxes) and len(boxes) >= 2:
+        underline = sum(1 for b in boxes if b.sides == {"bottom"})
+        if not any(len(b.sides) >= 3 for b in boxes) and underline * 2 <= len(boxes):
+            return None  # 「┘└」 corners and edges of a frame, not boxes
     if (len(boxes) >= 2 and not single_cells and all(s is None for s in suffixes)
             and len({(b.width, b.r1, b.r2) for b in boxes}) == 1):
         # [ ][ ][ ] one merged box per character (法人番号); few or wide boxes: keep the first only
@@ -1312,11 +1316,34 @@ def _detect_tables(g: Grid, regions: list[Region]):
                 continue
             body_rows, body_regs = res
             cols = [{"id": normalize_label(h.text), "label": h.text, "col": idx_to_col(h.c1)} for h in hdr]
+            ids = [c["id"] for c in cols]
+            if len(set(ids)) < len(ids):  # 人 / 円 / 人 / 円: name them after the caption above
+                for c, h in zip(cols, hdr):
+                    grp = _group_above(g, h)
+                    if grp:
+                        c["id"] = f"{grp}/{c['id']}"
+            ym = _year_month_column(g, hdr[0], body_rows)
+            if ym is not None:
+                ym_regs, ym_cols, ym_head = ym
+                cols = ym_cols + cols
+                body_regs = set(body_regs) | ym_regs
+                hdr = [ym_head] + list(hdr)
             label = None
             above = g.at(hdr[0].r1 - 1, hdr[0].c1)
             span = hdr[-1].c2 - hdr[0].c1 + 1
             if above is not None and is_label(above) and above.width * 2 >= span:
                 label = above.text
+            if label is None:
+                c = hdr[0].c1 - 1  # the caption on the left of the rows: 「最近6か月間における…明細」
+                while c >= 1:
+                    left = g.at(hdr[0].r1, c)
+                    if left is None:
+                        break
+                    if not left.empty:
+                        if left.merged and is_label(left, 80) and len(normalize_label(left.text)) >= 6:
+                            label = left.text
+                        break
+                    c = left.c1 - 1
             if label is None:
                 label = max((h.text for h in hdr), key=len)
             if normalize_label(label) in used_names:
@@ -1329,6 +1356,51 @@ def _detect_tables(g: Grid, regions: list[Region]):
                       "table", columns=cols, rows=body_rows)
             consumed_rows.update(range(hdr[0].r1, last_r + 1))
             yield f, set(hdr), body_regs
+
+
+def _group_above(g: Grid, h: Region) -> str:
+    """Captions stacked above a table header cell: 「支給人員・支給額」+「（臨時雇用者を除く。）」."""
+    found: list[str] = []
+    for r in range(h.r1 - 1, max(h.r1 - 4, 0), -1):
+        hit = None
+        for c in range(h.c1, h.c2 + 1):
+            reg = g.at(r, c)
+            if reg is not None and reg.r2 == r and not reg.empty and isinstance(reg.value, str) and is_label(reg, 60):
+                hit = reg
+                break
+        if hit is None:
+            break
+        found.append(_SPACES.sub("", hit.text))  # keep 「（臨時雇用者を除く。）」 as printed
+        if "top" in hit.sides:
+            break  # top of the header block
+    return "".join(reversed(found))
+
+
+def _year_month_column(g: Grid, first: Region, body_rows: list[int]):
+    """「年　月」 left of a table: each row has [ ]・[ ] (year, month) in that column."""
+    head = g.at(first.r1, first.c1 - 1)
+    if head is None or head.empty or not isinstance(head.value, str) or normalize_label(head.text) != "年月":
+        return None
+    cols = None
+    regs: set[Region] = set()
+    for r in body_rows:
+        boxes, c = [], head.c1
+        while c <= head.c2:
+            reg = g.at(r, c)
+            if reg is None:
+                return None
+            if reg.r1 == r and reg.empty and (reg.merged or reg.bordered):
+                boxes.append(reg)
+            c = reg.c2 + 1
+        if len(boxes) != 2:
+            return None
+        here = [b.c1 for b in boxes]
+        if cols is not None and here != cols:
+            return None
+        cols = here
+        regs.update(boxes)
+    return regs, [{"id": "年", "label": "年", "col": idx_to_col(cols[0])},
+                  {"id": "月", "label": "月", "col": idx_to_col(cols[1])}], head
 
 
 def _is_header(reg: Region) -> bool:

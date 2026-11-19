@@ -230,6 +230,8 @@ const fillCases = [
   { src: 'tests/fixtures_hard/frame_todoke.xlsx', data: { 日付: [2026, 12, 1] }, errors: true },
   { src: 'tests/fixtures_hard/uwamu_tel.xlsx', data: { 取り消されたことの有無: '有', '取り消されたことの有無(有の場合の年月日)': '2026-03-31', 電話: '082-251-1234' },
     expect: { '申請書!J2': '（有）', '申請書!L2': 8, '申請書!O2': 3, '申請書!R2': 31, '申請書!F7': '082', '申請書!H7': '251', '申請書!J7': '1234' } },
+  { src: 'tests/fixtures_hard/meisai.xlsx', data: { 年月: [{ 年: 8, 月: 5, '支給人員・支給額（臨時雇用者を除く。）/人': 5, '臨時雇用者の支給人員・支給額/円': 80000 }] },
+    expect: { '明細!B5': 8, '明細!D5': 5, '明細!E5': 5, '明細!M5': 80000 } },
   // tests/test_safety.py (fixtures_review: files saved by real Excel)
   { src: 'tests/fixtures_review/base.xlsx', data: { A11: 'x', A12: 'y', A14: 'z' }, expect: { 'Sheet1!A11': 'x', 'Sheet1!A12': 'y', 'Sheet1!A14': 'z' } },
   { src: 'tests/fixtures_review/empty.xlsx', data: { A1: 'a', B3: 'b', C2: 'c' }, expect: { 'Sheet1!A1': 'a', 'Sheet1!B3': 'b', 'Sheet1!C2': 'c' } },

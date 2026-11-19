@@ -339,6 +339,10 @@ def fill(
                 report.warnings.extend(_parts_warnings(f, value, key, wareki))
             elif f.kind == "choice_cells":
                 _fill_choice_cells(f, value, put, key, mark)
+                if f.parts and f.parts[0].get("circle"):
+                    report.warnings.append(
+                        f"{key}: ○で囲む欄なので、選んだ語を「（{normalize_label(str(value if isinstance(value, str) else value[0]))}）」"
+                        "と書きました。丸囲みが必要な提出先なら、印刷後に手で丸を付けてください")
             elif f.kind == "checkbox":
                 ctl = _control_of(wb, f)
                 on = _truthy(value, f)

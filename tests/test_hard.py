@@ -419,3 +419,27 @@ class SeparateCellLayoutTests(unittest.TestCase):
             self.assertEqual(current_value(sh, f["電話"]), "（082）251－1234")
         finally:
             shutil.rmtree(tmp)
+
+
+class MonthlyTableTests(unittest.TestCase):
+    """6か月の明細: 「年　月」 [ ]・[ ] column and 人/円 told apart by the captions above (third stand-in test)."""
+
+    path = os.path.join(FX, "meisai.xlsx")
+
+    def test_columns_and_fill(self):
+        t = next(f for f in detect(load(self.path)) if f.kind == "table")
+        ids = [c["id"] for c in t.columns]
+        self.assertEqual(ids[:2], ["年", "月"])
+        self.assertIn("支給人員・支給額（臨時雇用者を除く。）/人", ids)
+        self.assertIn("臨時雇用者の支給人員・支給額/円", ids)
+        tmp = tempfile.mkdtemp()
+        try:
+            out = os.path.join(tmp, "o.xlsx")
+            rows = [{"年": 8, "月": m, "支給人員・支給額（臨時雇用者を除く。）/人": 5} for m in (5, 6, 7)]
+            rep = fill(self.path, out, {t.id: rows})
+            self.assertEqual(rep.errors, [])
+            sh = load(out).sheet("明細")
+            self.assertEqual([(sh.value(r, 2), sh.value(r, 4), sh.value(r, 5)) for r in (5, 6, 7)],
+                             [(8, 5, 5), (8, 6, 5), (8, 7, 5)])
+        finally:
+            shutil.rmtree(tmp)
