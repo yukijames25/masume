@@ -46,6 +46,23 @@ def _load_fields(path: str):
     return [Field.from_dict(d) for d in raw]
 
 
+def _brief(report: dict) -> dict:
+    """One entry per field instead of one per cell (法人番号 is 13 cells)."""
+    key = "written" if "written" in report else "planned"
+    per: dict[str, list] = {}
+    for w in report.get(key, []):
+        per.setdefault(w.get("field") or w["key"], []).append(w["value"])
+    def join(v):
+        if len(v) == 1:
+            return v[0]
+        t = ["" if x is None else str(x) for x in v]
+        return "".join(t) if all(len(x) <= 1 for x in t) else " / ".join(t)  # 1文字1マス vs 分割欄
+    summary = {k: join(v) for k, v in per.items()}
+    out = dict(report)
+    out[key] = summary
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     _stdout_utf8()
     ap = argparse.ArgumentParser(prog="masume", description="Excel方眼紙フォームをAIが読み書きするためのツール")
@@ -75,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mark", default="■", help="チェックボックスの塗り記号（既定: ■）")
     p.add_argument("--strict", action="store_true", help="未知のキーがあれば失敗")
     p.add_argument("--fields", help="inspect --json の出力（手で修正したもの）を検出結果の代わりに使う")
+    p.add_argument("--brief", action="store_true", help="書いた内容を欄ごとに1行にまとめて出力する")
 
     p = sub.add_parser("convert", help="旧形式 .xls を .xlsx に変換（Excel または LibreOffice を使用）")
     p.add_argument("xls")
@@ -120,7 +138,10 @@ def main(argv: list[str] | None = None) -> int:
             data = json.loads(raw)
             fields = _load_fields(a.fields) if a.fields else None
             rep = fill(a.xlsx, a.output, data, sheet=a.sheet, mark=a.mark, strict=a.strict, fields=fields)
-            print(json.dumps(rep.to_dict(), ensure_ascii=False, indent=2))
+            out = rep.to_dict()
+            if a.brief:
+                out = _brief(out)
+            print(json.dumps(out, ensure_ascii=False, indent=2))
             return 0 if not rep.errors else 1
     except (OSError, KeyError, ValueError, zipfile.BadZipFile, ooxml.WriteError) as e:
         print(f"error: {e}", file=sys.stderr)

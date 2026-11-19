@@ -34,7 +34,7 @@ description: Read or fill a Japanese Excel form (Excel 方眼紙 / 神エクセ�
 
 4. **書き込む**
    ```
-   python -m masume fill <form.xlsx> values.json -o <form>_記入済.xlsx
+   python -m masume fill <form.xlsx> values.json -o <form>_記入済.xlsx --brief   # --brief: 書いた内容を欄ごとに1行で表示
    ```
    結果の `ok` と `saved` が true であることを確認する。`errors` があればファイルは作られない（`planned` は書く予定だった内容）。
    `verified: true` は「保存したファイルを読み直し、書いた値がそのセルに入っていた」という意味（正しい欄かどうかは手順5で確かめる）。

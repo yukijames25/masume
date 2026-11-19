@@ -443,3 +443,14 @@ class MonthlyTableTests(unittest.TestCase):
                              [(8, 5, 5), (8, 6, 5), (8, 7, 5)])
         finally:
             shutil.rmtree(tmp)
+
+
+class BriefOutputTests(unittest.TestCase):
+    def test_brief_groups_cells_per_field(self):
+        from masume.cli import _brief
+        rep = {"ok": True, "saved": True, "written": [
+            {"key": "法人番号", "field": "法人番号", "cell": "S!A1", "value": 1},
+            {"key": "法人番号", "field": "法人番号", "cell": "S!B1", "value": 2},
+            {"key": "電話", "field": "電話", "cell": "S!C1", "value": "082"},
+            {"key": "電話", "field": "電話", "cell": "S!D1", "value": "251"}]}
+        self.assertEqual(_brief(rep)["written"], {"法人番号": "12", "電話": "082 / 251"})
