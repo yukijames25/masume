@@ -72,4 +72,5 @@ $ masume fill 休暇届.xlsx values.json -o 休暇届_記入済.xlsx
 - [ ] README のスクリーンショット（ブラウザ版のサンプル）
 - [x] 実在の自治体様式で動作確認（広島市の6件、結果は docs/REAL_FORMS.md）。記事に様式の画像を載せるなら利用規約を確認すること
 - [x] 記事を投稿できる形に仕上げた（docs/article_zenn.md）
-- [ ] Zenn に投稿、X で告知、Claude の MCP / Skill ディレクトリに登録
+- [x] Zenn に投稿（2026-11-19）: https://zenn.dev/yukidev25/articles/fe349484127386
+- [ ] X で告知、Claude の MCP / Skill ディレクトリに登録

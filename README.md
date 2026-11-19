@@ -5,6 +5,8 @@ Python 標準ライブラリだけで動きます（依存ゼロ・約110KB）�
 
 *masume fills unmodified Japanese "Excel 方眼紙" government/office forms (merged cells, □ checkboxes, 和暦 dates) for AI agents, without breaking the layout. Zero dependencies; CLI, MCP server, Claude Code skill and an offline single-file web version.*
 
+紹介記事: [神エクセルの申請書を、AIに“壊さず”書かせるツールを作った（Zenn）](https://zenn.dev/yukidev25/articles/fe349484127386)
+
 ## インストール
 
 ```bash
